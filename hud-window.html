@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Poker HUD Overlay</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .hud-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      /* Ensure mouse events pass through */
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .hud-window {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      -webkit-app-region: no-drag;
+    }
+
+    .hud-window.draggable {
+      -webkit-app-region: drag;
+    }
+
+    .player-hud {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.8);
+      border: 2px solid #00ff00;
+      border-radius: 8px;
+      padding: 8px;
+      color: white;
+      font-size: 12px;
+      min-width: 120px;
+      pointer-events: none;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    .player-hud.hero {
+      border-color: #ff6b00;
+      background: rgba(255, 107, 0, 0.1);
+    }
+
+    .player-hud.tight {
+      border-color: #00ff00;
+    }
+
+    .player-hud.loose {
+      border-color: #ff0000;
+    }
+
+    .player-hud.aggressive {
+      border-color: #ffff00;
+    }
+
+    .player-name {
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px;
+      font-size: 11px;
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      padding: 1px 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+
+    .stat-label {
+      color: #ccc;
+    }
+
+    .stat-value {
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .stat-value.high {
+      color: #ff6b6b;
+    }
+
+    .stat-value.medium {
+      color: #ffd93d;
+    }
+
+    .stat-value.low {
+      color: #6bcf7f;
+    }
+
+    .hands-count {
+      text-align: center;
+      font-size: 10px;
+      color: #aaa;
+      margin-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.2);
+      padding-top: 2px;
+    }
+
+    /* Position the HUDs around the table - optimized for GG Poker layout */
+    .player-hud.seat-1 { top: 15%; left: 50%; transform: translateX(-50%); } /* BTN */
+    .player-hud.seat-2 { top: 25%; left: 15%; } /* SB */
+    .player-hud.seat-3 { top: 25%; left: 85%; } /* BB */
+    .player-hud.seat-4 { top: 40%; left: 5%; } /* UTG */
+    .player-hud.seat-5 { top: 40%; left: 95%; } /* MP */
+    .player-hud.seat-6 { top: 60%; left: 50%; transform: translateX(-50%); } /* CO */
+    .player-hud.seat-7 { top: 75%; left: 15%; } /* UTG+1 */
+    .player-hud.seat-8 { top: 75%; left: 85%; } /* MP+1 */
+    .player-hud.seat-9 { top: 50%; left: 2%; } /* UTG+2 */
+    .player-hud.seat-10 { top: 50%; left: 98%; } /* MP+2 */
+
+    .hud-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 2px solid #00ff00;
+      border-radius: 8px;
+      padding: 8px;
+      pointer-events: none;
+      z-index: 1000;
+      -webkit-app-region: no-drag;
+    }
+
+    .control-btn {
+      background: #333;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      margin: 2px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .control-btn:hover {
+      background: #555;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-container" id="hudContainer">
+    <div class="hud-window">
+      <div class="hud-controls">
+        <button class="control-btn" onclick="toggleHUD()">Toggle</button>
+        <button class="control-btn" onclick="hideHUD()">Hide</button>
+        <button class="control-btn" onclick="moveToGGPoker()">Move to GG</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    let currentTableData = null;
+    let isVisible = true;
+
+    // Listen for HUD updates from main process
+    ipcRenderer.on('hud-update', (event, data) => {
+      console.log('Received HUD update:', data);
+      currentTableData = data;
+      updateHUDDisplay();
+    });
+
+    function updateHUDDisplay() {
+      if (!currentTableData || !isVisible) return;
+
+      const container = document.getElementById('hudContainer');
+      
+      // Clear existing HUDs
+      const existingHUDs = container.querySelectorAll('.player-hud');
+      existingHUDs.forEach(hud => hud.remove());
+
+      // Create HUD for each player
+      currentTableData.players.forEach((player, index) => {
+        if (player.name && player.name !== 'Empty') {
+          createPlayerHUD(player, index + 1, currentTableData.stats[player.name]);
+        }
+      });
+    }
+
+    function createPlayerHUD(player, seatNumber, stats) {
+      const container = document.getElementById('hudContainer');
+      const hud = document.createElement('div');
+      hud.className = `player-hud seat-${seatNumber}`;
+      
+      // Determine player type based on stats
+      let playerType = 'normal';
+      if (player.name === 'Hero') {
+        playerType = 'hero';
+      } else if (stats) {
+        if (stats.vpip < 15) playerType = 'tight';
+        else if (stats.vpip > 30) playerType = 'loose';
+        if (stats.afq > 2.5) playerType = 'aggressive';
+      }
+      
+      hud.classList.add(playerType);
+
+      // Create player name
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'player-name';
+      nameDiv.textContent = player.name;
+      hud.appendChild(nameDiv);
+
+      // Create stats grid
+      const statsGrid = document.createElement('div');
+      statsGrid.className = 'stats-grid';
+
+      if (stats) {
+        // VPIP
+        addStat(statsGrid, 'VPIP', stats.vpip.toFixed(1) + '%');
+        
+        // PFR
+        addStat(statsGrid, 'PFR', stats.pfr.toFixed(1) + '%');
+        
+        // 3Bet
+        addStat(statsGrid, '3Bet', stats.threeBet.toFixed(1) + '%');
+        
+        // WTSD
+        addStat(statsGrid, 'WTSD', stats.wtsd.toFixed(1) + '%');
+        
+        // WWSF
+        addStat(statsGrid, 'WWSF', stats.wwsf.toFixed(1) + '%');
+        
+        // AFq
+        addStat(statsGrid, 'AFq', stats.afq.toFixed(1));
+      } else {
+        // No stats available
+        const noStats = document.createElement('div');
+        noStats.textContent = 'No data';
+        noStats.style.gridColumn = '1 / -1';
+        noStats.style.textAlign = 'center';
+        noStats.style.color = '#888';
+        statsGrid.appendChild(noStats);
+      }
+
+      hud.appendChild(statsGrid);
+
+      // Add hands count
+      if (stats && stats.hands) {
+        const handsDiv = document.createElement('div');
+        handsDiv.className = 'hands-count';
+        handsDiv.textContent = `${stats.hands} hands`;
+        hud.appendChild(handsDiv);
+      }
+
+      container.appendChild(hud);
+    }
+
+    function addStat(container, label, value) {
+      const statDiv = document.createElement('div');
+      statDiv.className = 'stat';
+      
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'stat-label';
+      labelSpan.textContent = label;
+      
+      const valueSpan = document.createElement('span');
+      valueSpan.className = 'stat-value';
+      valueSpan.textContent = value;
+      
+      // Color code based on value ranges
+      const numValue = parseFloat(value);
+      if (label === 'VPIP') {
+        if (numValue < 15) valueSpan.classList.add('low');
+        else if (numValue > 30) valueSpan.classList.add('high');
+        else valueSpan.classList.add('medium');
+      } else if (label === 'PFR') {
+        if (numValue < 10) valueSpan.classList.add('low');
+        else if (numValue > 20) valueSpan.classList.add('high');
+        else valueSpan.classList.add('medium');
+      }
+      
+      statDiv.appendChild(labelSpan);
+      statDiv.appendChild(valueSpan);
+      container.appendChild(statDiv);
+    }
+
+    function toggleHUD() {
+      isVisible = !isVisible;
+      const container = document.getElementById('hudContainer');
+      container.style.display = isVisible ? 'block' : 'none';
+    }
+
+    function hideHUD() {
+      isVisible = false;
+      const container = document.getElementById('hudContainer');
+      container.style.display = 'none';
+    }
+
+    function moveToGGPoker() {
+      // This will help position the overlay over your GG Poker table
+      const container = document.getElementById('hudContainer');
+      container.style.border = '3px solid #ff0000';
+      container.style.background = 'rgba(255, 0, 0, 0.1)';
+      console.log('Position this overlay over your GG Poker table!');
+    }
+
+    // Make window draggable
+    function makeDraggable() {
+      const hudWindow = document.querySelector('.hud-window');
+      if (hudWindow) {
+        hudWindow.classList.add('draggable');
+        console.log('Window made draggable');
+      }
+    }
+
+    // Show controls
+    function showControls() {
+      const controls = document.querySelector('.hud-controls');
+      if (controls) {
+        controls.style.display = 'block';
+        console.log('Controls shown');
+      }
+    }
+
+    // Initialize
+    console.log('HUD overlay window loaded');
+    makeDraggable();
+    showControls();
+  </script>
+</body>
+</html>

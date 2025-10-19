@@ -1,0 +1,21 @@
+{
+  "name": "poker_parser",
+  "version": "1.0.0",
+  "main": "electron-main.cjs",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "parse:ndjson": "node parser_starter.js sample_hand.txt --ndjson",
+    "validate": "node validate.js",
+    "check:sample": "node parser_starter.js sample_hand.txt --ndjson | node validate.js",
+    "test:metrics": "node metrics_core.test.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "chart.js": "^4.5.1",
+    "electron": "^31.7.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "yauzl": "^2.10.0"
+  }
+}

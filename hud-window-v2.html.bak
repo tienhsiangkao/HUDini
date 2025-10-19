@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Poker HUD v2</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .hud-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      -webkit-app-region: drag;
+    }
+
+    .hud-header {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 2px solid #00ff00;
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: white;
+      font-size: 14px;
+      font-weight: bold;
+      pointer-events: auto;
+      z-index: 1000;
+      -webkit-app-region: no-drag;
+    }
+
+    .hud-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 2px solid #00ff00;
+      border-radius: 8px;
+      padding: 8px;
+      pointer-events: auto;
+      z-index: 1000;
+      -webkit-app-region: no-drag;
+    }
+
+    .control-btn {
+      background: #333;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 8px;
+      margin: 2px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .control-btn:hover {
+      background: #555;
+    }
+
+    .player-hud {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.85);
+      border: 2px solid #00ff00;
+      border-radius: 8px;
+      padding: 8px;
+      color: white;
+      font-size: 12px;
+      min-width: 140px;
+      pointer-events: none;
+      z-index: 100;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    }
+
+    .player-name {
+      font-weight: bold;
+      color: #00ff00;
+      margin-bottom: 4px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      margin: 2px 0;
+    }
+
+    .stat-label {
+      color: #ccc;
+    }
+
+    .stat-value {
+      color: white;
+      font-weight: bold;
+    }
+
+    /* Position player HUDs around the table */
+    .player-hud.seat-1 { top: 15%; left: 50%; transform: translateX(-50%); }
+    .player-hud.seat-2 { top: 25%; left: 15%; }
+    .player-hud.seat-3 { top: 25%; left: 85%; }
+    .player-hud.seat-4 { top: 40%; left: 5%; }
+    .player-hud.seat-5 { top: 40%; left: 95%; }
+    .player-hud.seat-6 { top: 60%; left: 50%; transform: translateX(-50%); }
+    .player-hud.seat-7 { top: 75%; left: 15%; }
+    .player-hud.seat-8 { top: 75%; left: 85%; }
+    .player-hud.seat-9 { top: 50%; left: 2%; }
+    .player-hud.seat-10 { top: 50%; left: 98%; }
+
+    .status-indicator {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(0, 255, 0, 0.8);
+      color: black;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-container">
+    <div class="hud-header">
+      🎯 Poker HUD v2 - Drag over your table
+    </div>
+    
+    <div class="hud-controls">
+      <button class="control-btn" onclick="snapToTable()">Snap to Table</button>
+      <button class="control-btn" onclick="toggleStats()">Toggle Stats</button>
+      <button class="control-btn" onclick="refreshStats()">Refresh</button>
+      <button class="control-btn" onclick="hideHUD()">Hide</button>
+    </div>
+
+    <div class="status-indicator" id="statusIndicator">
+      HUD Active
+    </div>
+
+    <!-- Player HUDs will be dynamically created here -->
+    <div id="playerHUDs"></div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    let currentStats = [];
+    let statsVisible = true;
+
+    // Listen for stats updates
+    ipcRenderer.on('hud:update-stats', (event, data) => {
+      console.log('Received stats update:', data);
+      currentStats = data.players || [];
+      renderPlayerHUDs();
+    });
+
+    function renderPlayerHUDs() {
+      const container = document.getElementById('playerHUDs');
+      container.innerHTML = '';
+
+      if (!statsVisible) return;
+
+      // Create HUDs for up to 6 players
+      const playersToShow = currentStats.slice(0, 6);
+      
+      playersToShow.forEach((playerData, index) => {
+        const hud = document.createElement('div');
+        hud.className = `player-hud seat-${index + 1}`;
+        hud.innerHTML = `
+          <div class="player-name">${playerData.player}</div>
+          <div class="stat-row">
+            <span class="stat-label">VPIP:</span>
+            <span class="stat-value">${playerData.vpip.toFixed(1)}%</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">PFR:</span>
+            <span class="stat-value">${playerData.pfr.toFixed(1)}%</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">3Bet:</span>
+            <span class="stat-value">${playerData.threeBet.toFixed(1)}%</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Hands:</span>
+            <span class="stat-value">${playerData.hands}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">WTSD:</span>
+            <span class="stat-value">${playerData.wtsd.toFixed(1)}%</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">WWSF:</span>
+            <span class="stat-value">${playerData.wwsf.toFixed(1)}%</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">AFq:</span>
+            <span class="stat-value">${playerData.afq.toFixed(1)}%</span>
+          </div>
+        `;
+        container.appendChild(hud);
+      });
+
+      console.log(`Rendered ${playersToShow.length} player HUDs`);
+    }
+
+    function toggleStats() {
+      statsVisible = !statsVisible;
+      renderPlayerHUDs();
+      console.log('Stats visibility:', statsVisible);
+    }
+
+    function refreshStats() {
+      console.log('Refreshing stats...');
+      // Request fresh stats from main process
+      ipcRenderer.send('hud:refresh-stats');
+    }
+
+    function hideHUD() {
+      document.body.style.display = 'none';
+      console.log('HUD hidden');
+    }
+
+    function snapToTable() {
+      console.log('Snapping to table...');
+      // Request snap to table from main process
+      ipcRenderer.send('hud:snap-to-table');
+    }
+
+    // Initialize
+    console.log('HUD v2 overlay loaded');
+    renderPlayerHUDs();
+  </script>
+</body>
+</html>

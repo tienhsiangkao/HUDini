@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Poker Parser HUD</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' data: blob: file:;">
+  <style>
+    body { font-family: system-ui, Segoe UI, Arial; margin:0; }
+    header { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:#111827; color:#e5e7eb; }
+    header .left { display:flex; gap:8px; align-items:center; }
+    header .right { display:flex; gap:12px; align-items:center; }
+    header button { background:#374151; color:#e5e7eb; border:0; padding:6px 10px; border-radius:6px; cursor:pointer; }
+    header button.primary { background:#2563eb; }
+    header button.hud-btn { background:#16a34a; }
+    header button.hud-btn.active { background:#dc2626; }
+    header .pill { font-size:12px; padding:2px 6px; border-radius:999px; background:#16a34a; color:white; }
+    header .pill.bad { background:#ef4444; }
+    nav { display:flex; gap:8px; padding:8px 12px; background:#f3f4f6; border-bottom:1px solid #e5e7eb; }
+    nav .tab { padding:6px 10px; border-radius:6px; cursor:pointer; }
+    nav .tab.active { background:#111827; color:#fff; }
+    .container { display:grid; grid-template-columns: 1fr 1fr; gap:12px; padding:12px; }
+    .panel { border:1px solid #e5e7eb; border-radius:10px; overflow:hidden; background:#fff; }
+    .panel h3 { margin:0; padding:10px 12px; background:#f9fafb; border-bottom:1px solid #e5e7eb; }
+    .panel .body { padding:10px 12px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #f3f4f6; font-variant-numeric: tabular-nums; }
+    .muted { color:#6b7280; }
+    .searchbar input { width:100%; padding:6px 8px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .board { display:flex; align-items:center; gap:6px; }
+    .card { display:inline-block; border:1px solid #e5e7eb; padding:2px 6px; border-radius:6px; background:#f9fafb; }
+    /* overlay */
+    #import-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; }
+    #import-overlay.show { display:block; }
+    #import-modal { position:absolute; left:50%; top:10%; transform:translateX(-50%); width:min(900px, 90vw); background:#fff; border-radius:10px; overflow:hidden; border:1px solid #e5e7eb; }
+    #import-modal header { background:#111827; color:#fff; display:flex; justify-content:space-between; align-items:center; padding:8px 10px; }
+    #import-modal .controls { padding:8px 10px; display:flex; align-items:center; gap:8px; border-bottom:1px solid #e5e7eb; background:#f9fafb; }
+    #import-log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:10px; white-space:pre-wrap; height:420px; overflow:auto; background:#0b1020; color:#d1d5db; }
+  </style>
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+</head>
+<body>
+  <header>
+    <div class="left">
+      <button id="open-import">Import</button>
+      <button id="hud-toggle" class="hud-btn">HUD: OFF</button>
+      <span class="pill" id="preload-ok"  style="display:none">preload OK</span>
+      <span class="pill bad" id="preload-bad" style="display:none">preload missing</span>
+    </div>
+    <div class="right">
+      <!-- Build stamp injected by renderer_umd.js -->
+    </div>
+  </header>
+
+  <nav>
+    <div id="tab-stats" class="tab active">Player Stats</div>
+    <div id="tab-browser" class="tab">Hand Browser</div>
+    <div id="tab-dashboard" class="tab">Dashboard</div>
+  </nav>
+
+  <div id="root"></div>
+
+  <!-- Import overlay -->
+  <div id="import-overlay">
+    <div id="import-modal">
+      <header>
+        <div>Import Hands</div>
+        <button id="import-close">Close</button>
+      </header>
+      <div class="controls">
+        <label style="display:inline-flex;align-items:center;gap:8px;margin-right:12px;">
+          <input type="checkbox" id="import-overwrite" />
+          Overwrite duplicates
+        </label>
+        <button id="btn-import" class="primary">Start Import</button>
+        <button id="btn-testfile">Test a file</button>
+        <button id="btn-testfolder">Scan a folder</button>
+        <button id="import-clear">Clear log</button>
+      </div>
+      <pre id="import-log">Ready.</pre>
+    </div>
+  </div>
+
+  <!-- Vendor UMD bundles -->
+  <script src="./vendor/react.production.min.js"></script>
+  <script src="./vendor/react-dom.production.min.js"></script>
+  <script src="./vendor/chart.umd.js"></script>
+
+  <!-- App -->
+  <script src="./renderer_umd.js"></script>
+</body>
+</html>
