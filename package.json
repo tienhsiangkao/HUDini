@@ -1,5 +1,5 @@
 {
-  "name": "poker_parser",
+  "name": "hudini",
   "version": "1.0.0",
   "main": "electron-main.cjs",
   "type": "module",

@@ -1769,9 +1769,15 @@
     const totalHands = displayData?.totalHands ?? plotted;
 
     React.useEffect(() => {
+      const previousLength = lastTimelineLength.current || 0;
+      lastTimelineLength.current = timeline.length;
       if (!timeline.length) { setVisibleCount(0); return; }
       setVisibleCount((prev) => {
-        if (!prev || prev > timeline.length) return timeline.length;
+        if (!prev) return timeline.length;
+        if (prev > timeline.length) return timeline.length;
+        if (previousLength && prev === previousLength && timeline.length > previousLength) {
+          return timeline.length;
+        }
         return prev;
       });
     }, [timeline]);

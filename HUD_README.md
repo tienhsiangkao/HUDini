@@ -188,4 +188,4 @@ hud.debug = true;
 
 ## License
 
-This HUD system is part of the poker parser project and follows the same licensing terms.
+This HUD system is part of the HUDini project and follows the same licensing terms.

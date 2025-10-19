@@ -1,4 +1,4 @@
-# Poker Parser HUD
+# HUDini
 
 Node/Electron desktop app for parsing poker hand histories, loading them into SQLite, and exploring hero/player stats.
 
