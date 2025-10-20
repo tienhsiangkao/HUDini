@@ -42,6 +42,11 @@ Node/Electron desktop app for parsing poker hand histories, loading them into SQ
    npm run test:metrics
    ```
 
+7. **Verify bankroll graph integrity**
+   ```bash
+   npm run test:graph
+   ```
+
 ## Notes
 
 - The importer handles plain text, JSON/NDJSON, and `.gz` files; `.zip` archives are skipped with a progress note for now.
