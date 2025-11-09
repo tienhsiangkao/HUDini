@@ -9,6 +9,11 @@ const { app } = require('electron');
 
 const uiLogger = logger.child('UIHandlers');
 
+/**
+ * Default widget configuration with 4 visible dashboard widgets.
+ * @constant
+ * @type {object}
+ */
 const DEFAULT_WIDGET_CONFIG = {
   widgets: [
     { id: 'net_usd', visible: true },
@@ -18,12 +23,27 @@ const DEFAULT_WIDGET_CONFIG = {
   ]
 };
 
+/**
+ * Get a fresh copy of the default widget configuration.
+ * 
+ * @returns {object} Deep copy of default widget config
+ * @private
+ */
 function getDefaultWidgetConfig() {
   return {
     widgets: DEFAULT_WIDGET_CONFIG.widgets.map(widget => ({ ...widget }))
   };
 }
 
+/**
+ * Resolve the file path for widget configuration storage.
+ * Checks HUD_WIDGET_CONFIG_PATH environment variable, then falls back to userData directory.
+ * 
+ * @returns {object} Object with baseDir and filePath properties
+ * @returns {string} .baseDir - Directory containing config file
+ * @returns {string} .filePath - Full path to widget-config.json
+ * @private
+ */
 function resolveWidgetConfigPath() {
   const overridePath = process.env.HUD_WIDGET_CONFIG_PATH;
   if (overridePath) {
@@ -57,8 +77,31 @@ function resolveWidgetConfigPath() {
   };
 }
 
+/**
+ * Register all UI-related IPC handlers for HUD status and widget configuration.
+ * Provides endpoints for HUD state management and dashboard widget settings.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {object} hudManager - HUD manager instance for state access
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const hudManager = require('./lib/hud_manager.cjs');
+ * registerUIHandlers(ipcMain, hudManager);
+ * 
+ * @description
+ * Registered handlers:
+ * - hudv3:status - Get HUD v3 status including screen scraping state
+ * - widgets:getConfig - Get dashboard widget configuration
+ * - widgets:saveConfig - Save dashboard widget configuration
+ */
 function registerUIHandlers(ipcMain, hudManager) {
-  // Get HUD v3 status
+  /**
+   * IPC Handler: hudv3:status
+   * Get current HUD v3 status including active state and screen scraping info.
+   * 
+   * @returns {Promise<object>} HUD status object with isActive, hudWindowCount, screenScraping, etc.
+   */
   ipcMain.handle('hudv3:status', () => {
     try {
       const status = {

@@ -5,7 +5,13 @@ const { logger } = require('../lib/logger.cjs');
 const validatorLogger = logger.child('Validator');
 
 /**
- * Validation error class
+ * Custom error class for validation failures.
+ * Extends Error with field property for identifying which field failed validation.
+ * 
+ * @class ValidationError
+ * @extends Error
+ * @property {string} name - Error name ('ValidationError')
+ * @property {string} field - Name of the field that failed validation
  */
 class ValidationError extends Error {
   constructor(message, field) {
@@ -16,7 +22,19 @@ class ValidationError extends Error {
 }
 
 /**
- * Validate hand IDs array
+ * Validate an array of hand IDs for batch operations.
+ * Ensures handIds is an array of non-empty strings within size limit.
+ * 
+ * @param {Array<string>} handIds - Array of hand ID strings to validate
+ * @param {object} [options={}] - Validation options
+ * @param {number} [options.maxBatchSize=1000] - Maximum allowed batch size
+ * @returns {Array<string>} Validated array of hand IDs
+ * @throws {ValidationError} If validation fails (not array, empty, too large, invalid IDs)
+ * 
+ * @example
+ * const validIds = validateHandIds(['RC123', 'RC456']); // ['RC123', 'RC456']
+ * validateHandIds([]); // throws ValidationError: handIds array cannot be empty
+ * validateHandIds('RC123'); // throws ValidationError: handIds must be an array
  */
 function validateHandIds(handIds, options = {}) {
   const { maxBatchSize = 1000 } = options;
@@ -43,7 +61,19 @@ function validateHandIds(handIds, options = {}) {
 }
 
 /**
- * Validate annotation data
+ * Validate annotation data for create/update operations.
+ * Checks timestamp, date, and label fields for correct types.
+ * 
+ * @param {object} data - Annotation data to validate
+ * @param {number} [data.ts] - Unix timestamp in milliseconds
+ * @param {string} [data.date] - Date string (ISO format)
+ * @param {string} [data.label] - Annotation label text
+ * @returns {boolean} True if validation passes
+ * @throws {ValidationError} If any field has invalid type
+ * 
+ * @example
+ * validateAnnotation({ ts: 1699564800000, label: 'Session start' }); // true
+ * validateAnnotation({ ts: 'invalid' }); // throws ValidationError
  */
 function validateAnnotation(data) {
   const { ts, date, label } = data;
@@ -64,7 +94,19 @@ function validateAnnotation(data) {
 }
 
 /**
- * Validate pagination options
+ * Validate and normalize pagination options (limit and offset).
+ * Ensures limit is between 1-10000 and offset is non-negative.
+ * 
+ * @param {object} options - Pagination options
+ * @param {number} [options.limit=300] - Maximum results to return
+ * @param {number} [options.offset=0] - Number of results to skip
+ * @returns {object} Normalized pagination with {limit, offset}
+ * @throws {ValidationError} If limit or offset are invalid
+ * 
+ * @example
+ * validatePagination({ limit: 50, offset: 100 }); // { limit: 50, offset: 100 }
+ * validatePagination({ limit: '50' }); // { limit: 50, offset: 0 } (parses strings)
+ * validatePagination({ limit: 20000 }); // throws ValidationError
  */
 function validatePagination(options) {
   const { limit = 300, offset = 0 } = options;
@@ -84,7 +126,18 @@ function validatePagination(options) {
 }
 
 /**
- * Validate date range
+ * Validate and parse date range (from and to dates).
+ * Accepts ISO date strings or null, ensures 'from' is not after 'to'.
+ * 
+ * @param {string|null} from - Start date (ISO format) or null
+ * @param {string|null} to - End date (ISO format) or null
+ * @returns {object} Parsed date range with {fromTs, toTs} in milliseconds or null
+ * @throws {ValidationError} If dates are invalid or from > to
+ * 
+ * @example
+ * validateDateRange('2024-01-01', '2024-12-31'); // { fromTs: 1704067200000, toTs: 1735603200000 }
+ * validateDateRange(null, null); // { fromTs: null, toTs: null }
+ * validateDateRange('2024-12-31', '2024-01-01'); // throws ValidationError
  */
 function validateDateRange(from, to) {
   let fromTs = null;
@@ -112,7 +165,18 @@ function validateDateRange(from, to) {
 }
 
 /**
- * Validate stake format (e.g., "0.25/0.50")
+ * Validate and parse poker stake format (e.g., "0.25/0.50").
+ * Returns null for "all" or empty stake, otherwise parses small blind / big blind values.
+ * 
+ * @param {string|null} stake - Stake string in format "sb/bb" (e.g., "0.25/0.50"), "all", or null
+ * @returns {object|null} Parsed stake with {sb, bb} numbers, or null if stake is "all" or empty
+ * @throws {ValidationError} If stake format is invalid or values are negative
+ * 
+ * @example
+ * validateStake('0.25/0.50'); // { sb: 0.25, bb: 0.50 }
+ * validateStake('all'); // null
+ * validateStake('invalid'); // throws ValidationError
+ * validateStake('0.25/-0.50'); // throws ValidationError (negative bb)
  */
 function validateStake(stake) {
   if (!stake || stake === 'all') {
@@ -143,7 +207,19 @@ function validateStake(stake) {
 }
 
 /**
- * Validate sort options
+ * Validate sort options for database queries.
+ * Returns default values ('date' field, 'desc' direction) if not provided.
+ * 
+ * @param {string} [sortField] - Field to sort by (date, net, stakes, table, id)
+ * @param {string} [sortDir] - Sort direction (asc or desc)
+ * @returns {object} Validated sort options with {field, dir}
+ * @throws {ValidationError} If sortField or sortDir are invalid
+ * 
+ * @example
+ * validateSort('date', 'desc'); // { field: 'date', dir: 'desc' }
+ * validateSort(); // { field: 'date', dir: 'desc' } (defaults)
+ * validateSort('net', 'asc'); // { field: 'net', dir: 'asc' }
+ * validateSort('invalid', 'desc'); // throws ValidationError
  */
 function validateSort(sortField, sortDir) {
   const ALLOWED_SORT_FIELDS = ['date', 'net', 'stakes', 'table', 'id'];
@@ -164,7 +240,19 @@ function validateSort(sortField, sortDir) {
 }
 
 /**
- * Safe wrapper for validation functions
+ * Safe wrapper for validation functions.
+ * Catches ValidationError and returns a result object instead of throwing.
+ * 
+ * @param {Function} validatorFn - Validation function to execute
+ * @param {*} data - Data to validate
+ * @param {string} [fieldName='input'] - Field name for error logging
+ * @returns {object} Result object with {success, data} or {success, error, field}
+ * 
+ * @example
+ * validateSafe(validateHandIds, ['hand1', 'hand2']); // { success: true, data: [...] }
+ * validateSafe(validateHandIds, 'invalid'); // { success: false, error: 'handIds must be an array', field: 'handIds' }
+ * 
+ * @private
  */
 function validateSafe(validatorFn, data, fieldName = 'input') {
   try {

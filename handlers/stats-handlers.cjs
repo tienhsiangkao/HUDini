@@ -12,7 +12,11 @@ const { pathToFileURL } = require('url');
 const { BrowserWindow, dialog, app } = require('electron');
 
 /**
- * Helper: Fetch hands for metrics calculation
+ * Fetch all hands from database ordered by timestamp for metrics calculation.
+ * 
+ * @param {Database} database - better-sqlite3 database instance
+ * @returns {Array<object>} Array of hand objects with id, json, sb, bb, ts, heroNet, dateUTC, tableName
+ * @private
  */
 function fetchHandsForMetrics(database) {
   return database.prepare(`
@@ -23,7 +27,11 @@ function fetchHandsForMetrics(database) {
 }
 
 /**
- * Helper: Compute hero aggregate percentages
+ * Compute hero aggregate percentage statistics (PFR, 3-bet, WTSD, C-bet) from hand data.
+ * 
+ * @param {Array<object>} rows - Array of hand objects with json field
+ * @returns {object} Aggregate percentages including PFR_pct, ThreeBet_pct, WTSD_pct, CBet_pct
+ * @private
  */
 function computeHeroAggregatePercents(rows) {
   const totals = {
@@ -218,10 +226,45 @@ function isDbOpen(database) {
   return true;
 }
 
+/**
+ * Register all stats-related IPC handlers for player statistics and analytics.
+ * Provides endpoints for player stats queries, hero metrics, graph data, and CSV exports.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * @param {string} __dirname - Directory path for file operations
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * registerStatsHandlers(ipcMain, db, __dirname);
+ * 
+ * @description
+ * Registered handlers:
+ * - stats:list - Query player stats with filters (pagination, sorting, search)
+ * - stats:heroName - Get hero player name from most recent hand
+ * - stats:heroBreakdown - Get hero statistics breakdown by position/date
+ * - hero:graphData - Get bankroll graph data with caching
+ * - stats:rebuild - Rebuild player_stats table from hands
+ * - stats:list:export - Export player stats to CSV format
+ */
 function registerStatsHandlers(ipcMain, db, __dirname) {
   logger.info('Registering stats handlers');
 
-  // stats:list - Get player stats list with filters
+  /**
+   * IPC Handler: stats:list
+   * Query player statistics with pagination, sorting, and filtering.
+   * 
+   * @param {object} options - Query options
+   * @param {number} [options.limit=500] - Maximum results to return
+   * @param {number} [options.offset=0] - Number of results to skip
+   * @param {string} [options.order='hands'] - Sort field: 'hands', 'player', 'vpip', 'pfr', 'updated'
+   * @param {string} [options.dir='desc'] - Sort direction: 'asc', 'desc'
+   * @param {string} [options.player] - Filter by exact player name
+   * @param {string} [options.search] - Search player names (substring match)
+   * 
+   * @returns {Promise<Array>} Array of player stat objects with hands, VPIP, PFR, 3-bet, etc.
+   */
   ipcMain.handle('stats:list', (_event, options = {}) => {
     try {
       const {

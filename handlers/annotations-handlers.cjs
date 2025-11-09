@@ -4,6 +4,13 @@
 const { logger } = require('../lib/logger.cjs');
 const { validateAnnotation } = require('../utils/validators.cjs');
 
+/**
+ * Format annotation error message for user-friendly display.
+ * 
+ * @param {Error|string} error - Error object or message
+ * @returns {string} Formatted error message
+ * @private
+ */
 function formatAnnotationError(error) {
   const raw = (error && error.message) ? error.message : error;
   if (typeof raw !== 'string') {
@@ -16,12 +23,36 @@ function formatAnnotationError(error) {
 }
 
 /**
- * Register all annotation-related IPC handlers
+ * Register all annotation-related IPC handlers for timeline annotations CRUD operations.
+ * Provides endpoints for creating, reading, updating, and deleting timeline annotations.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * registerAnnotationsHandlers(ipcMain, db);
+ * 
+ * @description
+ * Registered handlers:
+ * - annotations:getAll - Get all annotations ordered by timestamp
+ * - annotations:add - Add new annotation with validation
+ * - annotations:update - Update existing annotation (label, notes, color)
+ * - annotations:delete - Delete annotation by ID
  */
 function registerAnnotationsHandlers(ipcMain, db) {
   logger.info('Registering annotations handlers');
 
-  // annotations:getAll - Get all annotations
+  /**
+   * IPC Handler: annotations:getAll
+   * Retrieve all timeline annotations ordered by timestamp.
+   * 
+   * @returns {Promise<object>} Response with success flag and annotations array
+   * @property {boolean} success - Operation success status
+   * @property {Array<object>} annotations - Array of annotation objects (id, ts, date, label, color, notes, createdAt)
+   * @property {string} [error] - Error message if operation failed
+   */
   ipcMain.handle('annotations:getAll', async () => {
     try {
       const annotations = db.prepare(`

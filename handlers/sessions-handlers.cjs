@@ -5,6 +5,13 @@ const { logger } = require('../lib/logger.cjs');
 const { aggregateHandsForReports } = require('../utils/aggregators.cjs');
 const config = require('../config/index.cjs');
 
+/**
+ * Check if sessions table uses camelCase column names (startTime vs start_time).
+ * 
+ * @param {Database} db - better-sqlite3 database instance
+ * @returns {boolean} True if using camelCase columns
+ * @private
+ */
 function hasCamelCaseSessionColumns(db) {
   try {
     const columns = db.prepare('PRAGMA table_info(sessions)').all();
@@ -14,6 +21,13 @@ function hasCamelCaseSessionColumns(db) {
   }
 }
 
+/**
+ * Derive hero player name from hand data by checking hand.hero or parsed JSON.
+ * 
+ * @param {Array<object>} [hands=[]] - Array of hand objects
+ * @returns {string} Hero player name or 'Hero' if not found
+ * @private
+ */
 function deriveHeroNameFromHands(hands = []) {
   for (const hand of hands) {
     if (hand?.hero) {
@@ -34,12 +48,39 @@ function deriveHeroNameFromHands(hands = []) {
 }
 
 /**
- * Register all session-related IPC handlers
+ * Register all session-related IPC handlers for session detection and analysis.
+ * Provides endpoints for session listing, detection, and detailed statistics.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * registerSessionsHandlers(ipcMain, db);
+ * 
+ * @description
+ * Registered handlers:
+ * - sessions:list - Get list of play sessions with filters
+ * - sessions:detect - Detect sessions from hands using time gap
+ * - sessions:details - Get detailed statistics for specific session
  */
 function registerSessionsHandlers(ipcMain, db) {
   logger.info('Registering sessions handlers');
 
-  // sessions:list - Get list of play sessions
+  /**
+   * IPC Handler: sessions:list
+   * Get list of play sessions with optional filtering.
+   * 
+   * @param {object} options - Query options
+   * @param {string} [options.from] - Start date filter (ISO format)
+   * @param {string} [options.to] - End date filter (ISO format)
+   * @param {string} [options.stake] - Stake level filter
+   * @param {number} [options.sessionGapMinutes=30] - Minutes of inactivity to separate sessions
+   * @param {number} [options.limit=50] - Maximum results to return
+   * 
+   * @returns {Promise<Array>} Array of session objects with startTime, endTime, hands, totalWon, etc.
+   */
   ipcMain.handle('sessions:list', (_event, options = {}) => {
     try {
       const {
