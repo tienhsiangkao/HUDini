@@ -2,6 +2,63 @@
 
 Node/Electron desktop app for parsing poker hand histories, loading them into SQLite, and exploring hero/player stats.
 
+## Features
+
+### 🎯 Core Functionality
+- **Hand History Parser**: Supports GGPoker and PokerStars formats
+- **SQLite Database**: 380k+ hands indexed with optimized queries
+- **Player Stats**: Comprehensive VPIP/PFR/3bet/AF metrics
+- **Hero Graph**: Bankroll tracking with cumulative profit visualization
+
+### 🔍 Advanced Filtering
+- **Basic Filters**: Stake, position, result, date range, BB range
+- **Advanced Filter Builder** 🆕: Combine multiple conditions with AND/OR logic
+  - 9 filter fields (position, result, heroNet, stake, villain, showdown, pot size, date)
+  - Type-specific operators (=, !=, >, <, >=, <=, contains, startsWith)
+  - **NOT logic**: Negate any condition (e.g., NOT Position = BTN)
+  - **Saved Presets** 🆕: Save, load, and manage filter combinations
+    - 6 default presets (Winning BTN, Losing Blinds, Big Pots, Recent Hands, etc.)
+    - Export/Import presets as JSON files
+    - localStorage persistence across sessions
+  - Visual condition builder with enable/disable toggles
+  - See [ADVANCED_FILTER_BUILDER.md](./ADVANCED_FILTER_BUILDER.md) and [SAVED_FILTER_PRESETS.md](./SAVED_FILTER_PRESETS.md)
+
+### 🎮 Hand Replay
+- **Interactive Replay**: Step through hands action-by-action
+- **Keyboard Controls**: Space (play/pause), arrows (step), J/K (jump to hero decisions)
+- **Street Navigation**: Quick jump to preflop/flop/turn/river
+- **Auto-Play**: Adjustable speed replay
+- **Hand Notes**: Add and save notes for specific hands
+- **Pot Odds Calculator**: Real-time equity calculations
+- **Run It Twice**: Dual board visualization
+
+### 📊 Analytics & Visualization
+- **Dashboard Widgets**: 8 customizable stat cards with quick filters
+- **Hourly Heatmap**: Win rate by hour of day with color coding
+- **Hand Range Visualizer**: 13x13 starting hand matrix with heat maps
+- **Session Management**: Auto-detect sessions, filter by session, track session stats
+- **Graph Export**: Export bankroll chart as PNG
+
+### 🎨 User Interface
+- **Dark/Light Theme**: Toggle with Ctrl+T, persisted preference
+- **Toast Notifications**: Success/error/info messages with auto-dismiss
+- **Keyboard Shortcuts**: Ctrl+1/2/3/4 (tabs), Ctrl+F (search), Ctrl+R (reload)
+- **Visual Feedback** 🆕: Smooth animations, loading spinners, progress bars, hover effects
+  - 4 loading components (spinner, progress bar, skeleton, checkmark)
+  - 15+ CSS animations for smooth transitions
+  - Hover effects on buttons, cards, and inputs
+  - Smooth panel expand/collapse (300ms transitions)
+  - See [VISUAL_FEEDBACK_IMPROVEMENTS.md](./VISUAL_FEEDBACK_IMPROVEMENTS.md)
+- **Responsive Design**: Optimized for different window sizes
+- **Virtual Scrolling**: Smooth performance with large hand lists
+
+### ⚡ Performance
+- **Tab Switch**: <10ms (20-200x faster than before)
+- **App Startup**: <100ms (10-30x faster)
+- **Smart Caching**: localStorage persistence for stats, graphs, sessions
+- **Zero Loading**: No loading states when switching tabs
+- **Optimized Database**: WAL mode, mmap, proper indexes
+
 ## Project layout
 
 - `parser_starter.js` – text parser that normalises GG/PokerStars style hand histories.
