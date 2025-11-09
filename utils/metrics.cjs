@@ -1,14 +1,22 @@
 /**
  * Metrics Utilities
- * Database query and calculation utilities for player statistics
+ * Database query and calculation utilities for player statistics.
+ * Provides functions for computing VPIP, PFR, 3-bet, C-bet, WTSD percentages
+ * and other poker statistics from hand data.
  */
 
 const { computeHeroHandMetrics } = require('../lib/hero_metrics.cjs');
 
 /**
- * Fetch all hands from database for metrics calculation
- * @param {Database} database - SQLite database instance
- * @returns {Array} Array of hand rows
+ * Fetch all hands from database ordered by timestamp for metrics calculation.
+ * Returns hands with JSON data, stakes, timestamps, and net profit.
+ * 
+ * @param {Database} database - better-sqlite3 database instance
+ * @returns {Array<object>} Array of hand objects with id, json, sb, bb, ts, heroNet, dateUTC, tableName
+ * 
+ * @example
+ * const hands = fetchHandsForMetrics(db);
+ * console.log(`Fetched ${hands.length} hands for analysis`);
  */
 function fetchHandsForMetrics(database) {
   return database.prepare(`
@@ -19,9 +27,29 @@ function fetchHandsForMetrics(database) {
 }
 
 /**
- * Compute aggregate statistics across multiple hands
- * @param {Array} rows - Array of hand rows from database
- * @returns {Object} Aggregated statistics with percentages
+ * Compute hero aggregate percentage statistics (PFR, 3-bet, WTSD, C-bet) from multiple hands.
+ * Calculates percentages by summing opportunities and actions across all hands.
+ * 
+ * @param {Array<object>} rows - Array of hand objects with json field
+ * @returns {object} Aggregate statistics object
+ * @property {number} pfr - Pre-flop raise percentage
+ * @property {number} pfrOpp - Number of PFR opportunities
+ * @property {number} threeBet - 3-bet percentage
+ * @property {number} threeBetOpp - Number of 3-bet opportunities
+ * @property {number} wtsd - Went to showdown percentage
+ * @property {number} wtsdOpp - Number of showdown opportunities
+ * @property {number} cbetF - Flop c-bet percentage
+ * @property {number} cbetFOpp - Flop c-bet opportunities
+ * @property {number} cbetT - Turn c-bet percentage
+ * @property {number} cbetTOpp - Turn c-bet opportunities
+ * @property {number} cbetR - River c-bet percentage
+ * @property {number} cbetROpp - River c-bet opportunities
+ * 
+ * @example
+ * const hands = fetchHandsForMetrics(db);
+ * const stats = computeHeroAggregatePercents(hands);
+ * console.log(`PFR: ${stats.pfr}% (${stats.pfrOpp} opportunities)`);
+ * console.log(`3-bet: ${stats.threeBet}% (${stats.threeBetOpp} opportunities)`);
  */
 function computeHeroAggregatePercents(rows) {
   const totals = {
@@ -88,9 +116,15 @@ function computeHeroAggregatePercents(rows) {
 }
 
 /**
- * Fetch the most recent hero name from database
- * @param {Database} db - SQLite database instance
- * @returns {string|null} Hero name or null if not found
+ * Fetch the most recent hero player name from database.
+ * Looks for latest hand with non-null hero field, falls back to any hand with hero.
+ * 
+ * @param {Database} db - better-sqlite3 database instance
+ * @returns {string|null} Hero player name or null if not found
+ * 
+ * @example
+ * const heroName = fetchLatestHeroName(db);
+ * console.log(`Hero player: ${heroName || 'Not found'}`);
  */
 function fetchLatestHeroName(db) {
   try {
@@ -119,11 +153,18 @@ function fetchLatestHeroName(db) {
 }
 
 /**
- * Calculate percentage with proper handling of edge cases
- * @param {number} numerator
- * @param {number} denominator
- * @param {number} decimals - Number of decimal places (default: 1)
- * @returns {number} Percentage
+ * Calculate percentage with proper handling of edge cases and rounding.
+ * Returns 0 for division by zero or non-finite inputs.
+ * 
+ * @param {number} numerator - The numerator value
+ * @param {number} denominator - The denominator value
+ * @param {number} [decimals=1] - Number of decimal places to round to
+ * @returns {number} Calculated percentage rounded to specified decimals
+ * 
+ * @example
+ * calculatePercentage(25, 100); // 25.0
+ * calculatePercentage(1, 3, 2); // 33.33
+ * calculatePercentage(10, 0); // 0 (handles division by zero)
  */
 function calculatePercentage(numerator, denominator, decimals = 1) {
   if (!denominator || denominator === 0) return 0;
@@ -134,10 +175,17 @@ function calculatePercentage(numerator, denominator, decimals = 1) {
 }
 
 /**
- * Format stake label (e.g., "$0.50/$1.00" or "$1/$2")
- * @param {number} sb - Small blind
- * @param {number} bb - Big blind
- * @returns {string} Formatted stake label
+ * Format stake label with currency symbols (e.g., "$0.50/$1.00" or "$1/$2").
+ * Shows two decimal places for values < $1, whole numbers for values >= $1.
+ * 
+ * @param {number} sb - Small blind amount
+ * @param {number} bb - Big blind amount
+ * @returns {string} Formatted stake label or 'Unknown' if invalid
+ * 
+ * @example
+ * formatStakeLabel(0.5, 1); // "$0.50/$1"
+ * formatStakeLabel(1, 2); // "$1/$2"
+ * formatStakeLabel(0.25, 0.5); // "$0.25/$0.50"
  */
 function formatStakeLabel(sb, bb) {
   if (!Number.isFinite(sb) || !Number.isFinite(bb)) return 'Unknown';
@@ -152,10 +200,18 @@ function formatStakeLabel(sb, bb) {
 }
 
 /**
- * Extract metrics from hand JSON string
- * @param {string} jsonStr - JSON string of hand data
- * @param {string} heroName - Hero player name
- * @returns {Object|null} Extracted metrics or null
+ * Extract poker metrics from hand JSON string using computeHeroHandMetrics.
+ * Parses JSON and computes VPIP, PFR, 3-bet, C-bet, and other statistics.
+ * 
+ * @param {string} jsonStr - JSON string containing hand data
+ * @param {string} [heroName='Hero'] - Hero player name for metric calculation
+ * @returns {object|null} Metrics object with VPIP, PFR, 3-bet, etc., or null if parsing fails
+ * 
+ * @example
+ * const metrics = extractHandMetrics(hand.json, 'PlayerName');
+ * if (metrics) {
+ *   console.log(`VPIP: ${metrics.vpip}, PFR: ${metrics.pfr}`);
+ * }
  */
 function extractHandMetrics(jsonStr, heroName = 'Hero') {
   if (!jsonStr) return null;
