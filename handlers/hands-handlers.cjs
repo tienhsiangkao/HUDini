@@ -4,13 +4,14 @@
 const { logger } = require('../lib/logger.cjs');
 const { validateHandIds } = require('../utils/validators.cjs');
 const { clearGraphCache } = require('../lib/hero_graph.cjs');
+const config = require('../config/index.cjs');
 
 const handsLogger = logger.child('HandsHandlers');
 
 // Performance: Cache for expensive range calculations
 const rangeCache = new Map();
-const RANGE_CACHE_TTL = 60000; // 1 minute
-const MAX_RANGE_CACHE_SIZE = 50;
+const RANGE_CACHE_TTL = config.cache.hands.ttl;
+const MAX_RANGE_CACHE_SIZE = config.cache.hands.maxEntries;
 
 function clearRangeCache() {
   rangeCache.clear();
@@ -85,7 +86,7 @@ function registerHandsHandlers(ipcMain, db) {
   ipcMain.handle('hands:list', (e, options = {}) => {
     const {
       q = '',
-      limit = 300,
+      limit = config.limits.hands.default,
       result = 'all',
       minBB,
       maxBB,
@@ -297,7 +298,7 @@ function registerHandsHandlers(ipcMain, db) {
         FROM hands
         WHERE extras LIKE ?
         ORDER BY ts DESC
-        LIMIT 100
+        LIMIT ${config.limits.hands.playerNotes}
       `;
       
       const stmt = db.prepare(sql);
@@ -389,7 +390,7 @@ function registerHandsHandlers(ipcMain, db) {
       }
       
       // Safety limit to prevent excessive memory usage
-      query += ' ORDER BY ts DESC LIMIT 10000';
+      query += ` ORDER BY ts DESC LIMIT ${config.limits.hands.max}`;
       
       // Fetch hands with JSON data
       const stmt = db.prepare(query);

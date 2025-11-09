@@ -3,6 +3,7 @@
 
 const { logger } = require('../lib/logger.cjs');
 const { aggregateHandsForReports } = require('../utils/aggregators.cjs');
+const config = require('../config/index.cjs');
 
 function hasCamelCaseSessionColumns(db) {
   try {
@@ -45,13 +46,13 @@ function registerSessionsHandlers(ipcMain, db) {
         from,
         to,
         stake,
-        sessionGapMinutes = 30,
-        limit = 50
+        sessionGapMinutes = config.sessions.gapMinutes,
+        limit = config.limits.sessions.default
       } = options || {};
 
       logger.debug('Fetching sessions list', { from, to, stake, sessionGapMinutes, limit });
 
-      const normalizedLimit = Math.max(1, Math.min(Number(limit) || 50, 500));
+      const normalizedLimit = Math.max(1, Math.min(Number(limit) || config.limits.sessions.default, config.limits.sessions.max));
 
       if (hasCamelCaseSessionColumns(db)) {
         const rows = db.prepare(`

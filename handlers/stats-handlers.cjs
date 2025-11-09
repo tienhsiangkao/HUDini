@@ -5,6 +5,7 @@ const { logger } = require('../lib/logger.cjs');
 const { namesEqual } = require('../lib/hand_utils.cjs');
 const { computeHeroHandMetrics } = require('../lib/hero_metrics.cjs');
 const { buildHeroGraphData } = require('../lib/hero_graph.cjs');
+const config = require('../config/index.cjs');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -273,7 +274,7 @@ function registerStatsHandlers(ipcMain, db, __dirname) {
       sql += ` ORDER BY ${column} ${direction}, ${secondary}`;
       sql += ' LIMIT ? OFFSET ?';
       
-      params.push(Math.max(1, Math.min(Number(limit) || 500, 5000)));
+      params.push(Math.max(1, Math.min(Number(limit) || config.limits.stats.default, config.limits.stats.max)));
       params.push(Math.max(0, Number(offset) || 0));
       
       const stmt = db.prepare(sql);
