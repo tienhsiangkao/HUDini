@@ -81,8 +81,55 @@ function buildAdvancedFilterClause(filter) {
   }
 }
 
+/**
+ * Register all hand-related IPC handlers for Electron main process.
+ * Provides endpoints for hand listing, filtering, retrieval, range analysis, and deletion.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * registerHandsHandlers(ipcMain, db);
+ * 
+ * @description
+ * Registered handlers:
+ * - hands:list - Query hands with filters (pagination, search, date range, stake, position)
+ * - hands:get - Get single hand by ID (summary)
+ * - hands:getById - Get full hand details with parsed JSON
+ * - hands:getRange - Aggregate hands by starting hand type (AA, KK, AKs, etc.)
+ * - hands:stakes - List unique stake levels in database
+ * - hands:getNotes - Get notes for a specific hand
+ * - hands:saveNotes - Save notes for a specific hand
+ * - hands:searchNotes - Search hands by notes content
+ * - hands:delete - Delete hands by IDs (with cache invalidation)
+ */
 function registerHandsHandlers(ipcMain, db) {
-  // List hands with filters
+  /**
+   * IPC Handler: hands:list
+   * Query hands with comprehensive filtering and pagination support.
+   * 
+   * @param {object} options - Query options
+   * @param {string} [options.q=''] - Search query (tableName, handId, or JSON content)
+   * @param {number} [options.limit=300] - Maximum results to return
+   * @param {string} [options.result='all'] - Filter by result: 'all', 'won', 'lost'
+   * @param {number} [options.minBB] - Minimum BB/100 filter
+   * @param {number} [options.maxBB] - Maximum BB/100 filter
+   * @param {string} [options.from] - Start date (ISO format)
+   * @param {string} [options.to] - End date (ISO format)
+   * @param {string} [options.stake] - Stake level (e.g., "0.05/0.10")
+   * @param {string} [options.sortField='date'] - Sort field: 'date', 'profit', 'stake'
+   * @param {string} [options.sortDir='desc'] - Sort direction: 'asc', 'desc'
+   * @param {string} [options.position] - Filter by position (e.g., "BTN", "SB")
+   * @param {string} [options.villain] - Filter by villain name
+   * @param {string} [options.showdown] - Filter by showdown: 'yes', 'no'
+   * @param {number} [options.minPot] - Minimum pot size
+   * @param {number} [options.maxPot] - Maximum pot size
+   * @param {Array} [options.advancedFilters] - Advanced filter array with NOT logic support
+   * 
+   * @returns {Promise<Array>} Array of hand objects with handId, dateUTC, tableName, sb, bb, heroNet, ts
+   */
   ipcMain.handle('hands:list', (e, options = {}) => {
     const {
       q = '',
