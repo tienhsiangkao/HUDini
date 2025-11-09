@@ -53,22 +53,20 @@ export function createTestDb() {
 
     CREATE TABLE IF NOT EXISTS annotations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      handId TEXT NOT NULL,
-      timestamp INTEGER NOT NULL,
-      dateUTC TEXT,
-      label TEXT,
+      ts INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      label TEXT NOT NULL,
+      color TEXT DEFAULT '#FF5722',
       notes TEXT,
-      FOREIGN KEY (handId) REFERENCES hands(id) ON DELETE CASCADE
+      createdAt INTEGER DEFAULT (strftime('%s', 'now'))
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-      id TEXT PRIMARY KEY,
-      startTime INTEGER NOT NULL,
-      endTime INTEGER,
-      hands INTEGER DEFAULT 0,
-      totalWon REAL DEFAULT 0,
-      avgStake TEXT,
-      tableNames TEXT
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      table_id TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      hands_played INTEGER DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_hands_ts ON hands(ts);
@@ -170,18 +168,17 @@ export const sampleHands = [
  */
 export const sampleAnnotations = [
   {
-    handId: 'RC3475980816',
-    timestamp: Date.now(),
-    dateUTC: '2024-10-27',
+    ts: Math.floor(Date.now() / 1000),
+    date: '2024-10-27',
     label: 'Great bluff',
+    color: '#4CAF50',
     notes: 'Villain showed weakness on turn'
   },
   {
-    handId: 'RC3475980817',
-    handId: 'RC3475980817',
-    timestamp: Date.now(),
-    dateUTC: '2024-10-27',
+    ts: Math.floor(Date.now() / 1000) + 3600,
+    date: '2024-10-27',
     label: 'Bad beat',
+    color: '#F44336',
     notes: 'Lost with top pair to runner-runner flush'
   }
 ];
@@ -210,12 +207,12 @@ export function seedTestDb(db) {
   }
 
   const insertAnnotation = db.prepare(`
-    INSERT INTO annotations (handId, timestamp, dateUTC, label, notes)
+    INSERT INTO annotations (ts, date, label, color, notes)
     VALUES (?, ?, ?, ?, ?)
   `);
 
   for (const ann of sampleAnnotations) {
-    insertAnnotation.run(ann.handId, ann.timestamp, ann.dateUTC, ann.label, ann.notes);
+    insertAnnotation.run(ann.ts, ann.date, ann.label, ann.color, ann.notes);
   }
 
   // Insert sample player stats

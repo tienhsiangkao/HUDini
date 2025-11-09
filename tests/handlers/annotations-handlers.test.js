@@ -191,20 +191,5 @@ describe('annotations-handlers', () => {
       expect(result.changes).toBe(0);
     });
 
-    test('should cascade delete when hand is deleted', async () => {
-      // This tests database constraint, not handler directly
-      const handId = 'RC3475980816';
-      
-      // Get annotations for this hand
-      const before = db.prepare('SELECT COUNT(*) as count FROM annotations WHERE handId = ?').get(handId);
-      expect(before.count).toBeGreaterThan(0);
-      
-      // Delete the hand
-      db.prepare('DELETE FROM hands WHERE id = ?').run(handId);
-      
-      // Annotations should be deleted automatically (CASCADE)
-      const after = db.prepare('SELECT COUNT(*) as count FROM annotations WHERE handId = ?').get(handId);
-      expect(after.count).toBe(0);
-    });
   });
 });
