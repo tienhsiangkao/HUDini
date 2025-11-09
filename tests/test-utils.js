@@ -28,6 +28,7 @@ export function createTestDb() {
       heroNet REAL,
       json TEXT,
       notes TEXT,
+      extras TEXT,
       site TEXT,
       handNumber TEXT,
       gameType TEXT,
