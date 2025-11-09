@@ -1,0 +1,161 @@
+{
+  "name": "GGPoker Rush & Cash (Calibrated)",
+  "maxPlayers": 6,
+  "calibratedAt": "2025-10-24T04:57:05.246Z",
+  "topLeftCorner": {
+    "width": 334,
+    "height": 63,
+    "templatePath": "./templates/topLeftCorner_template.png"
+  },
+  "cropWidth": 1200,
+  "cropHeight": 800,
+  "regions": {
+    "totalPot": {
+      "x": 485,
+      "y": 299,
+      "width": 277,
+      "height": 81
+    },
+    "buttonSearchArea": {
+      "x": 695,
+      "y": 774,
+      "width": 400,
+      "height": 100
+    },
+    "playerPositions": [
+      {
+        "seat": 0,
+        "name": {
+          "x": 517,
+          "y": 648,
+          "width": 122,
+          "height": 68
+        },
+        "stack": {
+          "x": 517,
+          "y": 806,
+          "width": 122,
+          "height": 68
+        },
+        "cards": {
+          "x": 660,
+          "y": 648,
+          "width": 61,
+          "height": 113
+        }
+      },
+      {
+        "seat": 1,
+        "name": {
+          "x": 33,
+          "y": 500,
+          "width": 111,
+          "height": 65
+        },
+        "stack": {
+          "x": 33,
+          "y": 653,
+          "width": 111,
+          "height": 65
+        },
+        "cards": {
+          "x": 163,
+          "y": 500,
+          "width": 56,
+          "height": 109
+        }
+      },
+      {
+        "seat": 2,
+        "name": {
+          "x": 64,
+          "y": 128,
+          "width": 113,
+          "height": 65
+        },
+        "stack": {
+          "x": 64,
+          "y": 281,
+          "width": 113,
+          "height": 65
+        },
+        "cards": {
+          "x": 196,
+          "y": 128,
+          "width": 57,
+          "height": 109
+        }
+      },
+      {
+        "seat": 3,
+        "name": {
+          "x": 507,
+          "y": 38,
+          "width": 126,
+          "height": 66
+        },
+        "stack": {
+          "x": 507,
+          "y": 191,
+          "width": 126,
+          "height": 66
+        },
+        "cards": {
+          "x": 654,
+          "y": 38,
+          "width": 63,
+          "height": 110
+        }
+      },
+      {
+        "seat": 4,
+        "name": {
+          "x": 960,
+          "y": 126,
+          "width": 130,
+          "height": 69
+        },
+        "stack": {
+          "x": 960,
+          "y": 287,
+          "width": 130,
+          "height": 69
+        },
+        "cards": {
+          "x": 1111,
+          "y": 126,
+          "width": 65,
+          "height": 115
+        }
+      },
+      {
+        "seat": 5,
+        "name": {
+          "x": 996,
+          "y": 518,
+          "width": 127,
+          "height": 61
+        },
+        "stack": {
+          "x": 996,
+          "y": 660,
+          "width": 127,
+          "height": 61
+        },
+        "cards": {
+          "x": 1144,
+          "y": 518,
+          "width": 64,
+          "height": 102
+        }
+      }
+    ]
+  },
+  "templates": {
+    "foldButton": "./templates/foldButton_template.png",
+    "callButton": "./templates/callButton_template.png",
+    "raiseButton": "./templates/raiseButton_template.png",
+    "dealerButton": "./templates/dealerButton_template.png",
+    "coveredCard": "./templates/coveredCard_template.png"
+  }
+}

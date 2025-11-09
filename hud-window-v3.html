@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>HUDini - Phase 1</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      font-family: 'Segoe UI', 'Roboto', sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .hud-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+    }
+
+    /* Control Panel */
+    .control-panel {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(20, 20, 20, 0.95);
+      border: 2px solid #3b82f6;
+      border-radius: 12px;
+      padding: 12px;
+      pointer-events: auto;
+      z-index: 10000;
+      min-width: 200px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .control-header {
+      color: #3b82f6;
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .control-btn {
+      background: #374151;
+      color: white;
+      border: 1px solid #4b5563;
+      border-radius: 6px;
+      padding: 6px 12px;
+      margin: 4px 2px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .control-btn:hover {
+      background: #4b5563;
+      border-color: #6b7280;
+    }
+
+    .control-btn.active {
+      background: #3b82f6;
+      border-color: #2563eb;
+    }
+
+    /* Hero Stats Panel */
+    .hero-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(20, 20, 20, 0.95);
+      border: 2px solid #22c55e;
+      border-radius: 12px;
+      padding: 12px;
+      pointer-events: auto;
+      z-index: 9999;
+      min-width: 220px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .hero-header {
+      color: #22c55e;
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .hero-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      color: #d1d5db;
+    }
+
+    .stat-label {
+      color: #9ca3af;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      color: white;
+    }
+
+    .stat-value.positive {
+      color: #22c55e;
+    }
+
+    .stat-value.negative {
+      color: #ef4444;
+    }
+
+    /* Player Stat Bubbles */
+    .player-bubble {
+      position: absolute;
+      background: rgba(30, 30, 30, 0.95);
+      border: 2px solid #6b7280;
+      border-radius: 10px;
+      padding: 8px 10px;
+      pointer-events: auto;
+      cursor: move;
+      min-width: 140px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      transition: border-color 0.2s, transform 0.1s;
+      z-index: 100;
+    }
+
+    .player-bubble:hover {
+      border-color: #3b82f6;
+      transform: scale(1.02);
+    }
+
+    .player-bubble.dragging {
+      opacity: 0.8;
+      cursor: grabbing;
+      z-index: 10000;
+    }
+
+    .player-name {
+      font-weight: bold;
+      font-size: 12px;
+      color: white;
+      margin-bottom: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .player-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      font-size: 11px;
+    }
+
+    .player-stat {
+      display: flex;
+      justify-content: space-between;
+      color: #d1d5db;
+    }
+
+    .player-stat-label {
+      color: #9ca3af;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+
+    .player-stat-value {
+      font-weight: 600;
+      color: white;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hands-indicator {
+      font-size: 10px;
+      color: #6b7280;
+      margin-top: 4px;
+      text-align: center;
+    }
+
+    /* Stat color coding */
+    .stat-tight {
+      color: #3b82f6 !important;
+    }
+
+    .stat-loose {
+      color: #ef4444 !important;
+    }
+
+    .stat-aggressive {
+      color: #f59e0b !important;
+    }
+
+    .stat-passive {
+      color: #10b981 !important;
+    }
+
+    /* Layout Grid Helper */
+    .layout-grid {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 1;
+      display: none;
+    }
+
+    /* Rush & Cash Session Panel */
+    .rush-session-panel {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.95);
+      border: 2px solid #f59e0b;
+      border-radius: 12px;
+      padding: 12px 20px;
+      pointer-events: auto;
+      z-index: 9999;
+      min-width: 300px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      display: none;
+    }
+
+    .rush-session-panel.active {
+      display: block;
+    }
+
+    .rush-header {
+      color: #f59e0b;
+      font-weight: bold;
+      font-size: 14px;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .rush-stats {
+      display: flex;
+      justify-content: space-around;
+      gap: 15px;
+    }
+
+    .rush-stat-item {
+      text-align: center;
+    }
+
+    .rush-stat-label {
+      color: #9ca3af;
+      font-size: 10px;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .rush-stat-value {
+      color: white;
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    .layout-grid.active {
+      display: block;
+      background-image: 
+        repeating-linear-gradient(0deg, rgba(59, 130, 246, 0.1) 0px, transparent 1px, transparent 50px, rgba(59, 130, 246, 0.1) 51px),
+        repeating-linear-gradient(90deg, rgba(59, 130, 246, 0.1) 0px, transparent 1px, transparent 50px, rgba(59, 130, 246, 0.1) 51px);
+    }
+
+    /* Settings Panel */
+    .settings-panel {
+      position: absolute;
+      top: 60px;
+      right: 10px;
+      background: rgba(20, 20, 20, 0.95);
+      border: 2px solid #6b7280;
+      border-radius: 12px;
+      padding: 12px;
+      pointer-events: auto;
+      z-index: 9998;
+      min-width: 200px;
+      max-height: 400px;
+      overflow-y: auto;
+      display: none;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .settings-panel.active {
+      display: block;
+    }
+
+    .settings-section {
+      margin-bottom: 12px;
+    }
+
+    .settings-title {
+      color: #9ca3af;
+      font-size: 11px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .stat-toggle {
+      display: flex;
+      align-items: center;
+      padding: 4px;
+      margin: 2px 0;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .stat-toggle:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .stat-checkbox {
+      margin-right: 8px;
+    }
+
+    .stat-toggle-label {
+      color: #d1d5db;
+      font-size: 12px;
+    }
+
+    /* Toast Notifications */
+    .toast {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20, 20, 20, 0.95);
+      border: 2px solid #3b82f6;
+      border-radius: 8px;
+      padding: 10px 16px;
+      color: white;
+      font-size: 13px;
+      pointer-events: none;
+      z-index: 20000;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .toast.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud-container">
+    <!-- Layout Grid Helper -->
+    <div class="layout-grid" id="layoutGrid"></div>
+
+    <!-- Hero Stats Panel -->
+    <div class="hero-panel" id="heroPanel">
+      <div class="hero-header">Hero Stats</div>
+      <div class="hero-stats" id="heroStats">
+        <div class="stat-row">
+          <span class="stat-label">Hands:</span>
+          <span class="stat-value" id="heroHands">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">VPIP:</span>
+          <span class="stat-value" id="heroVPIP">0%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">PFR:</span>
+          <span class="stat-value" id="heroPFR">0%</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">BB/100:</span>
+          <span class="stat-value" id="heroBB100">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Rush & Cash Session Panel -->
+    <div class="rush-session-panel" id="rushSessionPanel">
+      <div class="rush-header">🚀 Rush & Cash Session</div>
+      <div class="rush-stats">
+        <div class="rush-stat-item">
+          <div class="rush-stat-label">Hands</div>
+          <div class="rush-stat-value" id="rushHands">0</div>
+        </div>
+        <div class="rush-stat-item">
+          <div class="rush-stat-label">VPIP</div>
+          <div class="rush-stat-value" id="rushVPIP">0%</div>
+        </div>
+        <div class="rush-stat-item">
+          <div class="rush-stat-label">PFR</div>
+          <div class="rush-stat-value" id="rushPFR">0%</div>
+        </div>
+        <div class="rush-stat-item">
+          <div class="rush-stat-label">Status</div>
+          <div class="rush-stat-value" id="rushStatus" style="font-size: 14px; color: #22c55e;">⏸️ Ready</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="control-panel">
+      <div class="control-header">
+        <span>HUDini Control</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <button class="control-btn" id="btnGrid" title="Toggle layout grid">
+          📐 Grid
+        </button>
+        <button class="control-btn" id="btnSettings" title="HUD settings">
+          ⚙️ Settings
+        </button>
+        <button class="control-btn" id="btnReset" title="Reset positions">
+          🔄 Reset
+        </button>
+        <button class="control-btn" id="btnRefresh" title="Refresh data">
+          ♻️ Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Settings Panel -->
+    <div class="settings-panel" id="settingsPanel">
+      <div class="settings-section">
+        <div class="settings-title">Displayed Stats</div>
+        <div id="statToggles"></div>
+      </div>
+      <div class="settings-section">
+        <div class="settings-title">Options</div>
+        <label class="stat-toggle">
+          <input type="checkbox" class="stat-checkbox" id="autoRefresh" checked>
+          <span class="stat-toggle-label">Auto Refresh</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Player Bubbles Container -->
+    <div id="playerBubbles"></div>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    // State
+    let players = [];
+    let hero = null;
+    let config = {};
+    let draggedElement = null;
+    let dragOffset = { x: 0, y: 0 };
+
+    // Available stats
+    const availableStats = [
+      { key: 'vpip', label: 'VPIP' },
+      { key: 'pfr', label: 'PFR' },
+      { key: 'hands', label: 'Hands' },
+      { key: 'cbet', label: 'C-Bet' },
+      { key: 'wtsd', label: 'WTSD' },
+      { key: 'threeBet', label: '3-Bet' },
+      { key: 'avgBB', label: 'Avg BB' },
+      { key: 'wonPct', label: 'Won %' }
+    ];
+
+    // Initialize
+    function init() {
+      console.log('🎯 HUD v3 initializing...');
+      setupEventListeners();
+      setupStatToggles();
+      requestUpdate();
+    }
+
+    // Setup event listeners
+    function setupEventListeners() {
+      // Control buttons
+      document.getElementById('btnGrid').addEventListener('click', toggleGrid);
+      document.getElementById('btnSettings').addEventListener('click', toggleSettings);
+      document.getElementById('btnReset').addEventListener('click', resetPositions);
+      document.getElementById('btnRefresh').addEventListener('click', requestUpdate);
+
+      // IPC listeners
+      ipcRenderer.on('hud:update', (event, data) => {
+        console.log('📊 Received HUD update:', data);
+        players = data.players || [];
+        hero = data.hero;
+        config = data.config || {};
+        
+        // Check if this is Rush & Cash mode
+        if (data.isRushAndCash && data.session) {
+          showRushAndCashMode(data.session);
+        } else {
+          hideRushAndCashMode();
+        }
+        
+        updateDisplay();
+      });
+
+      // Drag and drop for player bubbles
+      document.addEventListener('mousedown', handleDragStart);
+      document.addEventListener('mousemove', handleDragMove);
+      document.addEventListener('mouseup', handleDragEnd);
+    }
+
+    // Setup stat toggles
+    function setupStatToggles() {
+      const container = document.getElementById('statToggles');
+      container.innerHTML = '';
+
+      availableStats.forEach(stat => {
+        const toggle = document.createElement('label');
+        toggle.className = 'stat-toggle';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'stat-checkbox';
+        checkbox.checked = true;
+        checkbox.addEventListener('change', () => toggleStat(stat.key));
+        
+        const label = document.createElement('span');
+        label.className = 'stat-toggle-label';
+        label.textContent = stat.label;
+        
+        toggle.appendChild(checkbox);
+        toggle.appendChild(label);
+        container.appendChild(toggle);
+      });
+    }
+
+    // Update display
+    function updateDisplay() {
+      updateHeroStats();
+      updatePlayerBubbles();
+    }
+
+    // Show Rush & Cash mode
+    function showRushAndCashMode(session) {
+      const panel = document.getElementById('rushSessionPanel');
+      panel.classList.add('active');
+      
+      document.getElementById('rushHands').textContent = session.handsPlayed || 0;
+      document.getElementById('rushVPIP').textContent = (session.vpip || 0) + '%';
+      document.getElementById('rushPFR').textContent = (session.pfr || 0) + '%';
+      
+      const statusEl = document.getElementById('rushStatus');
+      if (session.handsPlayed > 0) {
+        statusEl.textContent = '✅ Active';
+        statusEl.style.color = '#22c55e';
+      } else {
+        statusEl.textContent = '⏸️ Ready';
+        statusEl.style.color = '#9ca3af';
+      }
+    }
+
+    // Hide Rush & Cash mode
+    function hideRushAndCashMode() {
+      const panel = document.getElementById('rushSessionPanel');
+      panel.classList.remove('active');
+    }
+
+    // Update hero stats panel
+    function updateHeroStats() {
+      if (!hero) return;
+
+      document.getElementById('heroHands').textContent = hero.hands.toLocaleString();
+      document.getElementById('heroVPIP').textContent = hero.vpip + '%';
+      document.getElementById('heroPFR').textContent = hero.pfr + '%';
+      
+      const bb100El = document.getElementById('heroBB100');
+      bb100El.textContent = (hero.bbPer100 >= 0 ? '+' : '') + hero.bbPer100.toFixed(2);
+      bb100El.className = 'stat-value ' + (hero.bbPer100 >= 0 ? 'positive' : 'negative');
+    }
+
+    // Update player bubbles
+    function updatePlayerBubbles() {
+      const container = document.getElementById('playerBubbles');
+      
+      // Clear existing bubbles
+      container.innerHTML = '';
+
+      // Create bubbles for each player
+      players.forEach((player, index) => {
+        const bubble = createPlayerBubble(player, index);
+        container.appendChild(bubble);
+      });
+    }
+
+    // Create player bubble
+    function createPlayerBubble(player, index) {
+      const bubble = document.createElement('div');
+      bubble.className = 'player-bubble';
+      bubble.dataset.playerName = player.name;
+      
+      // Position (spiral layout around center)
+      const angle = (index / players.length) * 2 * Math.PI;
+      const radius = 200;
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+      const x = centerX + radius * Math.cos(angle) - 70;
+      const y = centerY + radius * Math.sin(angle) - 60;
+      
+      bubble.style.left = x + 'px';
+      bubble.style.top = y + 'px';
+
+      // Player name
+      const nameEl = document.createElement('div');
+      nameEl.className = 'player-name';
+      nameEl.textContent = player.name;
+      bubble.appendChild(nameEl);
+
+      // Stats grid
+      const statsEl = document.createElement('div');
+      statsEl.className = 'player-stats';
+
+      // Add stats
+      const displayStats = config.displayedStats || ['vpip', 'pfr', 'hands', 'cbet'];
+      displayStats.slice(0, 6).forEach(statKey => {
+        const stat = availableStats.find(s => s.key === statKey);
+        if (!stat) return;
+
+        const statEl = document.createElement('div');
+        statEl.className = 'player-stat';
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'player-stat-label';
+        labelEl.textContent = stat.label;
+
+        const valueEl = document.createElement('span');
+        valueEl.className = 'player-stat-value';
+        
+        let value = player[statKey];
+        if (value === null || value === undefined) {
+          valueEl.textContent = '-';
+        } else if (statKey === 'hands') {
+          valueEl.textContent = value.toLocaleString();
+        } else if (statKey === 'avgBB') {
+          valueEl.textContent = value.toFixed(1);
+        } else {
+          valueEl.textContent = value + '%';
+          // Color code percentages
+          if (statKey === 'vpip' || statKey === 'pfr') {
+            if (value > 30) valueEl.classList.add('stat-loose');
+            else if (value < 15) valueEl.classList.add('stat-tight');
+          }
+        }
+
+        statEl.appendChild(labelEl);
+        statEl.appendChild(valueEl);
+        statsEl.appendChild(statEl);
+      });
+
+      bubble.appendChild(statsEl);
+
+      // Hands indicator
+      const handsEl = document.createElement('div');
+      handsEl.className = 'hands-indicator';
+      handsEl.textContent = `${player.hands} hands`;
+      bubble.appendChild(handsEl);
+
+      return bubble;
+    }
+
+    // Drag handling
+    function handleDragStart(e) {
+      const bubble = e.target.closest('.player-bubble');
+      if (!bubble) return;
+
+      draggedElement = bubble;
+      bubble.classList.add('dragging');
+
+      const rect = bubble.getBoundingClientRect();
+      dragOffset.x = e.clientX - rect.left;
+      dragOffset.y = e.clientY - rect.top;
+
+      e.preventDefault();
+    }
+
+    function handleDragMove(e) {
+      if (!draggedElement) return;
+
+      const x = e.clientX - dragOffset.x;
+      const y = e.clientY - dragOffset.y;
+
+      draggedElement.style.left = x + 'px';
+      draggedElement.style.top = y + 'px';
+    }
+
+    function handleDragEnd(e) {
+      if (!draggedElement) return;
+
+      draggedElement.classList.remove('dragging');
+      
+      // Save position
+      const playerName = draggedElement.dataset.playerName;
+      const rect = draggedElement.getBoundingClientRect();
+      ipcRenderer.send('hud:savePosition', {
+        player: playerName,
+        x: rect.left,
+        y: rect.top
+      });
+
+      showToast(`Position saved for ${playerName}`);
+      draggedElement = null;
+    }
+
+    // Toggle grid
+    function toggleGrid() {
+      const grid = document.getElementById('layoutGrid');
+      grid.classList.toggle('active');
+      document.getElementById('btnGrid').classList.toggle('active');
+    }
+
+    // Toggle settings
+    function toggleSettings() {
+      const panel = document.getElementById('settingsPanel');
+      panel.classList.toggle('active');
+      document.getElementById('btnSettings').classList.toggle('active');
+    }
+
+    // Reset positions
+    function resetPositions() {
+      showToast('Positions reset');
+      updatePlayerBubbles();
+    }
+
+    // Request update from main process
+    function requestUpdate() {
+      ipcRenderer.send('hud:requestUpdate');
+      showToast('Refreshing HUD data...');
+    }
+
+    // Toggle stat
+    function toggleStat(statKey) {
+      ipcRenderer.send('hud:toggleStat', statKey);
+    }
+
+    // Show toast
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2000);
+    }
+
+    // Auto-refresh
+    setInterval(() => {
+      if (document.getElementById('autoRefresh').checked) {
+        requestUpdate();
+      }
+    }, 5000);
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>

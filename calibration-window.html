@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Scraping Calibration Tool</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #1e1e1e;
+      color: #e0e0e0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    #toolbar {
+      background: #2d2d2d;
+      padding: 12px 20px;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      border-bottom: 1px solid #3d3d3d;
+      flex-shrink: 0;
+    }
+    
+    #toolbar button {
+      background: #007acc;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: background 0.2s;
+    }
+    
+    #toolbar button:hover {
+      background: #005a9e;
+    }
+    
+    #toolbar button:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    
+    #toolbar button.success {
+      background: #16825d;
+    }
+    
+    #toolbar button.success:hover {
+      background: #0e6848;
+    }
+    
+    #toolbar button.danger {
+      background: #d32f2f;
+    }
+    
+    #toolbar button.danger:hover {
+      background: #b71c1c;
+    }
+    
+    #toolbar select {
+      background: #3d3d3d;
+      color: #e0e0e0;
+      border: 1px solid #555;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    
+    #toolbar .status {
+      margin-left: auto;
+      font-size: 13px;
+      color: #ffa500;
+    }
+    
+    #main-container {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    
+    #canvas-container {
+      flex: 1;
+      position: relative;
+      overflow: auto;
+      background: #252525;
+    }
+    
+    #canvas {
+      display: block;
+      cursor: crosshair;
+    }
+    
+    #sidebar {
+      width: 350px;
+      background: #2d2d2d;
+      border-left: 1px solid #3d3d3d;
+      overflow-y: auto;
+      padding: 20px;
+      flex-shrink: 0;
+    }
+    
+    .section {
+      margin-bottom: 25px;
+    }
+    
+    .section h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #4fc3f7;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    .region-list {
+      list-style: none;
+    }
+    
+    .region-item {
+      background: #3d3d3d;
+      padding: 10px;
+      margin-bottom: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .region-item.marked {
+      background: #16825d;
+    }
+    
+    .region-item button {
+      background: #d32f2f;
+      color: white;
+      border: none;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    
+    .region-item button:hover {
+      background: #b71c1c;
+    }
+    
+    .coords {
+      font-family: 'Courier New', monospace;
+      color: #a0a0a0;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+    
+    .instructions {
+      background: #3d3d3d;
+      padding: 15px;
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+    
+    .instructions strong {
+      color: #4fc3f7;
+    }
+    
+    .test-results {
+      background: #3d3d3d;
+      padding: 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-top: 10px;
+      font-family: 'Courier New', monospace;
+    }
+    
+    .test-results.success {
+      border-left: 4px solid #16825d;
+    }
+    
+    .test-results.error {
+      border-left: 4px solid #d32f2f;
+    }
+    
+    .progress {
+      margin-top: 15px;
+      font-size: 12px;
+    }
+    
+    .progress-bar {
+      background: #3d3d3d;
+      height: 20px;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    
+    .progress-fill {
+      background: linear-gradient(90deg, #007acc, #16825d);
+      height: 100%;
+      transition: width 0.3s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 11px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="loadBtn">Load Screenshot</button>
+    <select id="regionSelect">
+      <option value="">Select Region Type...</option>
+      <option value="topLeftCorner">Top-Left Corner (50x50)</option>
+      <option value="totalPot">Total Pot</option>
+      <option value="foldButton">Fold Button</option>
+      <option value="callButton">Call Button</option>
+      <option value="raiseButton">Raise Button</option>
+      <option value="dealerButton">Dealer Button</option>
+      <option value="coveredCard">Covered Card</option>
+      <option value="player0">Player 0 (Hero)</option>
+      <option value="player1">Player 1</option>
+      <option value="player2">Player 2</option>
+      <option value="player3">Player 3</option>
+      <option value="player4">Player 4</option>
+      <option value="player5">Player 5</option>
+    </select>
+    <button id="testOCRBtn" disabled>Test OCR</button>
+    <button id="extractTemplatesBtn" disabled>Extract Templates</button>
+    <button id="saveConfigBtn" class="success" disabled>Save Config</button>
+    <button id="clearBtn" class="danger">Clear All</button>
+    <div class="status" id="status">No screenshot loaded</div>
+  </div>
+  
+  <div id="main-container">
+    <div id="canvas-container">
+      <canvas id="canvas"></canvas>
+    </div>
+    
+    <div id="sidebar">
+      <div class="instructions">
+        <strong>How to Use:</strong><br>
+        1. Click "Load Screenshot" to load your GGPoker image<br>
+        2. Select a region type from dropdown<br>
+        3. Click and drag on the image to mark the region<br>
+        4. Repeat for all regions<br>
+        5. Click "Test OCR" to verify accuracy<br>
+        6. Click "Extract Templates" to save button images<br>
+        7. Click "Save Config" to save configuration
+      </div>
+      
+      <div class="section">
+        <h3>Marked Regions</h3>
+        <ul class="region-list" id="regionList">
+          <li class="region-item">No regions marked yet</li>
+        </ul>
+      </div>
+      
+      <div class="section" id="progressSection" style="display: none;">
+        <h3>Progress</h3>
+        <div class="progress">
+          <div id="progressText">0 / 13 regions marked</div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section" id="testSection" style="display: none;">
+        <h3>OCR Test Results</h3>
+        <div class="test-results" id="testResults">
+          Click "Test OCR" to verify text recognition accuracy
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let loadedImage = null;
+    let regions = {};
+    let currentRegion = null;
+    let isDrawing = false;
+    let startX = 0;
+    let startY = 0;
+    
+    // Update UI elements
+    const loadBtn = document.getElementById('loadBtn');
+    const regionSelect = document.getElementById('regionSelect');
+    const testOCRBtn = document.getElementById('testOCRBtn');
+    const extractTemplatesBtn = document.getElementById('extractTemplatesBtn');
+    const saveConfigBtn = document.getElementById('saveConfigBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const status = document.getElementById('status');
+    const regionList = document.getElementById('regionList');
+    const progressSection = document.getElementById('progressSection');
+    const progressText = document.getElementById('progressText');
+    const progressFill = document.getElementById('progressFill');
+    const testSection = document.getElementById('testSection');
+    const testResults = document.getElementById('testResults');
+    
+    // Required regions for validation
+    const REQUIRED_REGIONS = [
+      'topLeftCorner', 'totalPot', 'foldButton', 'callButton', 'raiseButton',
+      'dealerButton', 'coveredCard', 'player0', 'player1', 'player2', 'player3', 'player4', 'player5'
+    ];
+    
+    // Load screenshot
+    loadBtn.addEventListener('click', async () => {
+      const result = await window.electronAPI.calibration.loadScreenshot();
+      if (result.success) {
+        const img = new Image();
+        img.onload = () => {
+          loadedImage = img;
+          canvas.width = img.width;
+          canvas.height = img.height;
+          redrawCanvas();
+          status.textContent = `Loaded: ${result.width}x${result.height}`;
+          testOCRBtn.disabled = false;
+          extractTemplatesBtn.disabled = false;
+        };
+        img.src = result.dataURL;
+      } else {
+        alert('Failed to load screenshot: ' + result.error);
+      }
+    });
+    
+    // Canvas drawing
+    canvas.addEventListener('mousedown', (e) => {
+      if (!loadedImage || !regionSelect.value) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      startX = e.clientX - rect.left;
+      startY = e.clientY - rect.top;
+      isDrawing = true;
+    });
+    
+    canvas.addEventListener('mousemove', (e) => {
+      if (!isDrawing) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+      
+      redrawCanvas();
+      
+      // Draw current selection
+      ctx.strokeStyle = '#4fc3f7';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+      ctx.setLineDash([]);
+    });
+    
+    canvas.addEventListener('mouseup', (e) => {
+      if (!isDrawing) return;
+      isDrawing = false;
+      
+      const rect = canvas.getBoundingClientRect();
+      const endX = e.clientX - rect.left;
+      const endY = e.clientY - rect.top;
+      
+      const x = Math.min(startX, endX);
+      const y = Math.min(startY, endY);
+      const width = Math.abs(endX - startX);
+      const height = Math.abs(endY - startY);
+      
+      if (width > 5 && height > 5) {
+        const regionType = regionSelect.value;
+        regions[regionType] = { x, y, width, height };
+        updateRegionList();
+        updateProgress();
+        redrawCanvas();
+        regionSelect.value = ''; // Clear selection
+      }
+    });
+    
+    // Redraw canvas with all regions
+    function redrawCanvas() {
+      if (!loadedImage) return;
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(loadedImage, 0, 0);
+      
+      // Draw all marked regions
+      Object.entries(regions).forEach(([name, region]) => {
+        ctx.strokeStyle = '#16825d';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(region.x, region.y, region.width, region.height);
+        
+        // Draw label
+        ctx.fillStyle = '#16825d';
+        ctx.fillRect(region.x, region.y - 20, 150, 20);
+        ctx.fillStyle = 'white';
+        ctx.font = '12px Arial';
+        ctx.fillText(name, region.x + 5, region.y - 6);
+      });
+    }
+    
+    // Update region list
+    function updateRegionList() {
+      if (Object.keys(regions).length === 0) {
+        regionList.innerHTML = '<li class="region-item">No regions marked yet</li>';
+        return;
+      }
+      
+      regionList.innerHTML = Object.entries(regions).map(([name, region]) => `
+        <li class="region-item marked">
+          <div>
+            <strong>${name}</strong>
+            <div class="coords">x:${Math.round(region.x)} y:${Math.round(region.y)} w:${Math.round(region.width)} h:${Math.round(region.height)}</div>
+          </div>
+          <button onclick="removeRegion('${name}')">Remove</button>
+        </li>
+      `).join('');
+    }
+    
+    // Update progress
+    function updateProgress() {
+      const marked = Object.keys(regions).length;
+      const total = REQUIRED_REGIONS.length;
+      const percent = Math.round((marked / total) * 100);
+      
+      progressSection.style.display = 'block';
+      progressText.textContent = `${marked} / ${total} regions marked`;
+      progressFill.style.width = percent + '%';
+      progressFill.textContent = percent + '%';
+      
+      saveConfigBtn.disabled = marked < total;
+    }
+    
+    // Remove region
+    window.removeRegion = (name) => {
+      delete regions[name];
+      updateRegionList();
+      updateProgress();
+      redrawCanvas();
+    };
+    
+    // Clear all
+    clearBtn.addEventListener('click', () => {
+      if (confirm('Clear all marked regions?')) {
+        regions = {};
+        updateRegionList();
+        updateProgress();
+        redrawCanvas();
+        testSection.style.display = 'none';
+      }
+    });
+    
+    // Test OCR
+    testOCRBtn.addEventListener('click', async () => {
+      if (!loadedImage || Object.keys(regions).length === 0) {
+        alert('Please mark some regions first');
+        return;
+      }
+      
+      status.textContent = 'Testing OCR...';
+      testSection.style.display = 'block';
+      testResults.className = 'test-results';
+      testResults.textContent = 'Testing...';
+      
+      const result = await window.electronAPI.calibration.testOCR(regions);
+      
+      if (result.success) {
+        testResults.className = 'test-results success';
+        testResults.innerHTML = `
+          <strong>OCR Test Results:</strong><br><br>
+          ${result.results.map(r => `
+            <strong>${r.region}:</strong> "${r.text}"<br>
+            Confidence: ${r.confidence || 'N/A'}<br><br>
+          `).join('')}
+        `;
+        status.textContent = 'OCR test completed';
+      } else {
+        testResults.className = 'test-results error';
+        testResults.textContent = 'Error: ' + result.error;
+        status.textContent = 'OCR test failed';
+      }
+    });
+    
+    // Extract templates
+    extractTemplatesBtn.addEventListener('click', async () => {
+      if (!loadedImage || Object.keys(regions).length === 0) {
+        alert('Please mark some regions first');
+        return;
+      }
+      
+      status.textContent = 'Extracting templates...';
+      
+      const result = await window.electronAPI.calibration.extractTemplates(regions);
+      
+      if (result.success) {
+        alert(`Templates extracted successfully!\n\nSaved ${result.count} templates to:\n${result.directory}`);
+        status.textContent = `Extracted ${result.count} templates`;
+      } else {
+        alert('Failed to extract templates: ' + result.error);
+        status.textContent = 'Template extraction failed';
+      }
+    });
+    
+    // Save config
+    saveConfigBtn.addEventListener('click', async () => {
+      if (Object.keys(regions).length < REQUIRED_REGIONS.length) {
+        alert('Please mark all required regions before saving');
+        return;
+      }
+      
+      status.textContent = 'Saving configuration...';
+      
+      const result = await window.electronAPI.calibration.saveConfig(regions);
+      
+      if (result.success) {
+        alert(`Configuration saved successfully!\n\nSaved to: ${result.path}`);
+        status.textContent = 'Configuration saved';
+      } else {
+        alert('Failed to save configuration: ' + result.error);
+        status.textContent = 'Save failed';
+      }
+    });
+  </script>
+</body>
+</html>

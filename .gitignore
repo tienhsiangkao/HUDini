@@ -7,9 +7,18 @@ build/
 out/
 
 # Database files
+hands.db
+live_session.db
 *.db
 *.db-*
 *.sqlite
+
+# OCR / model assets
+*.traineddata
+
+# Runtime temp directories
+tmp/
+tmp_import/
 
 # Logs
 *.log
