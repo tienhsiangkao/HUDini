@@ -71,7 +71,7 @@ export function createTestDb() {
 
     CREATE INDEX IF NOT EXISTS idx_hands_ts ON hands(ts);
     CREATE INDEX IF NOT EXISTS idx_hands_hero_date ON hands(hero, dateUTC);
-    CREATE INDEX IF NOT EXISTS idx_annotations_handId ON annotations(handId);
+    CREATE INDEX IF NOT EXISTS idx_annotations_ts ON annotations(ts);
   `);
 
   return db;
