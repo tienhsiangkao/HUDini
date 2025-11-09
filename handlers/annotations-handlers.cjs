@@ -4,6 +4,17 @@
 const { logger } = require('../lib/logger.cjs');
 const { validateAnnotation } = require('../utils/validators.cjs');
 
+function formatAnnotationError(error) {
+  const raw = (error && error.message) ? error.message : error;
+  if (typeof raw !== 'string') {
+    return 'annotation error';
+  }
+  if (raw.includes('ts must be a valid number')) {
+    return 'timestamp must be a valid number';
+  }
+  return raw;
+}
+
 /**
  * Register all annotation-related IPC handlers
  */
@@ -22,8 +33,9 @@ function registerAnnotationsHandlers(ipcMain, db) {
       logger.debug('Fetched annotations', { count: annotations.length });
       return { success: true, annotations };
     } catch (error) {
-      logger.error('Failed to get annotations', { error: error.message });
-      return { success: false, message: error.message, annotations: [] };
+      const formatted = formatAnnotationError(error);
+      logger.error('Failed to get annotations', { error: formatted });
+      return { success: false, error: formatted, annotations: [] };
     }
   });
 
@@ -44,8 +56,9 @@ function registerAnnotationsHandlers(ipcMain, db) {
       logger.info('Annotation added', { id: result.lastInsertRowid, label });
       return { success: true, annotation };
     } catch (error) {
-      logger.error('Failed to add annotation', { error: error.message });
-      return { success: false, message: error.message };
+      const formatted = formatAnnotationError(error);
+      logger.error('Failed to add annotation', { error: formatted });
+      return { success: false, error: formatted };
     }
   });
 
@@ -53,7 +66,7 @@ function registerAnnotationsHandlers(ipcMain, db) {
   ipcMain.handle('annotations:update', async (_event, { id, label, color, notes }) => {
     try {
       if (!id) {
-        return { success: false, message: 'Annotation ID required' };
+        return { success: false, error: 'annotation id required' };
       }
       
       // Whitelist of allowed fields (security: prevent SQL injection)
@@ -75,20 +88,21 @@ function registerAnnotationsHandlers(ipcMain, db) {
       }
       
       if (updates.length === 0) {
-        return { success: false, message: 'No fields to update' };
+        return { success: false, error: 'No fields to update' };
       }
       
       values.push(id);
       const stmt = db.prepare(`UPDATE annotations SET ${updates.join(', ')} WHERE id = ?`);
-      stmt.run(...values);
+      const result = stmt.run(...values);
       
       const annotation = db.prepare('SELECT * FROM annotations WHERE id = ?').get(id);
       
       logger.info('Annotation updated', { id, fields: updates.length });
-      return { success: true, annotation };
+      return { success: true, annotation, changes: result.changes };
     } catch (error) {
-      logger.error('Failed to update annotation', { error: error.message, id });
-      return { success: false, message: error.message };
+      const formatted = formatAnnotationError(error);
+      logger.error('Failed to update annotation', { error: formatted, id });
+      return { success: false, error: formatted };
     }
   });
 
@@ -96,17 +110,18 @@ function registerAnnotationsHandlers(ipcMain, db) {
   ipcMain.handle('annotations:delete', async (_event, id) => {
     try {
       if (!id) {
-        return { success: false, message: 'Annotation ID required' };
+        return { success: false, error: 'annotation id required' };
       }
       
       const stmt = db.prepare('DELETE FROM annotations WHERE id = ?');
       const result = stmt.run(id);
       
       logger.info('Annotation deleted', { id, deleted: result.changes > 0 });
-      return { success: true, deleted: result.changes > 0 };
+      return { success: true, deleted: result.changes > 0, changes: result.changes };
     } catch (error) {
-      logger.error('Failed to delete annotation', { error: error.message, id });
-      return { success: false, message: error.message };
+      const formatted = formatAnnotationError(error);
+      logger.error('Failed to delete annotation', { error: formatted, id });
+      return { success: false, error: formatted };
     }
   });
 

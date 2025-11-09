@@ -85,6 +85,29 @@ describe('hands-handlers', () => {
       
       expect(result[0].ts).toBeGreaterThan(result[1].ts);
     });
+
+    test('should filter using advanced position conditions', async () => {
+      const result = await handlers['hands:list'](createMockEvent(), { 
+        advancedFilters: [
+          { field: 'position', value: 'CO', enabled: true }
+        ]
+      });
+      
+      expect(result.length).toBe(1);
+      expect(result[0].handId).toBe('RC3475980817');
+    });
+
+    test('should support NOT logic in advanced filters', async () => {
+      const result = await handlers['hands:list'](createMockEvent(), { 
+        advancedFilters: [
+          { field: 'position', value: 'CO', enabled: true, not: true }
+        ]
+      });
+      
+      expect(result.length).toBe(2);
+      const ids = result.map((r) => r.handId).sort();
+      expect(ids).toEqual(['RC3475980816', 'RC3475980818']);
+    });
   });
 
   describe('hands:get', () => {

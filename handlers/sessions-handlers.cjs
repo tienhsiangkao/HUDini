@@ -4,6 +4,34 @@
 const { logger } = require('../lib/logger.cjs');
 const { aggregateHandsForReports } = require('../utils/aggregators.cjs');
 
+function hasCamelCaseSessionColumns(db) {
+  try {
+    const columns = db.prepare('PRAGMA table_info(sessions)').all();
+    return columns.some(col => col.name === 'startTime');
+  } catch {
+    return false;
+  }
+}
+
+function deriveHeroNameFromHands(hands = []) {
+  for (const hand of hands) {
+    if (hand?.hero) {
+      return hand.hero;
+    }
+    if (hand?.json) {
+      try {
+        const parsed = JSON.parse(hand.json);
+        if (parsed?.hero) return parsed.hero;
+        const heroPlayer = parsed?.players?.find(player => player?.isHero);
+        if (heroPlayer?.name) return heroPlayer.name;
+      } catch {
+        // Ignore malformed JSON
+      }
+    }
+  }
+  return 'Hero';
+}
+
 /**
  * Register all session-related IPC handlers
  */
@@ -17,22 +45,49 @@ function registerSessionsHandlers(ipcMain, db) {
         from,
         to,
         stake,
-        sessionGapMinutes = 30, // Gap of 30+ minutes = new session
+        sessionGapMinutes = 30,
         limit = 50
       } = options || {};
-      
+
       logger.debug('Fetching sessions list', { from, to, stake, sessionGapMinutes, limit });
-      
+
+      const normalizedLimit = Math.max(1, Math.min(Number(limit) || 50, 500));
+
+      if (hasCamelCaseSessionColumns(db)) {
+        const rows = db.prepare(`
+          SELECT id, startTime, endTime, hands, totalWon, avgStake
+          FROM sessions
+          WHERE startTime IS NOT NULL
+          ORDER BY startTime DESC
+          LIMIT ?
+        `).all(normalizedLimit);
+
+        return rows.map(row => {
+          const durationMinutes = row.startTime && row.endTime
+            ? Math.round((row.endTime - row.startTime) / 60000)
+            : 0;
+
+          return {
+            id: row.id,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            durationMinutes,
+            hands: row.hands || 0,
+            totalWon: Number(row.totalWon || 0),
+            avgStake: row.avgStake || stake || null
+          };
+        });
+      }
+
       const clauses = [];
       const params = [];
-      
+
       let sql = `
         SELECT id, ts, heroNet, sb, bb, tableName
         FROM hands
         WHERE ts IS NOT NULL
       `;
-      
-      // Apply filters
+
       const fromTs = Date.parse(from);
       if (!Number.isNaN(fromTs)) {
         clauses.push('ts >= ?');
@@ -54,31 +109,27 @@ function registerSessionsHandlers(ipcMain, db) {
           }
         }
       }
-      
+
       if (clauses.length) {
         sql += ' AND ' + clauses.join(' AND ');
       }
-      
+
       sql += ' ORDER BY ts ASC';
-      
-      const stmt = db.prepare(sql);
-      const hands = stmt.all(...params);
-      
+
+      const hands = db.prepare(sql).all(...params);
+
       if (hands.length === 0) {
         logger.debug('No hands found for session list');
         return [];
       }
-      
-      // Group hands into sessions
+
       const sessions = [];
       let currentSession = null;
       const gapMs = sessionGapMinutes * 60 * 1000;
-      
+
       for (const hand of hands) {
         if (!currentSession) {
-          // Start first session
           currentSession = {
-            sessionId: sessions.length + 1,
             startTime: hand.ts,
             endTime: hand.ts,
             handCount: 1,
@@ -90,12 +141,10 @@ function registerSessionsHandlers(ipcMain, db) {
           };
         } else {
           const timeSinceLastHand = hand.ts - currentSession.endTime;
-          
+
           if (timeSinceLastHand > gapMs) {
-            // Gap detected - finalize current session and start new one
             sessions.push(currentSession);
             currentSession = {
-              sessionId: sessions.length + 1,
               startTime: hand.ts,
               endTime: hand.ts,
               handCount: 1,
@@ -106,7 +155,6 @@ function registerSessionsHandlers(ipcMain, db) {
               worstHand: hand.heroNet || 0
             };
           } else {
-            // Continue current session
             currentSession.endTime = hand.ts;
             currentSession.handCount++;
             currentSession.netProfit += (hand.heroNet || 0);
@@ -116,44 +164,39 @@ function registerSessionsHandlers(ipcMain, db) {
           }
         }
       }
-      
-      // Add final session
+
       if (currentSession) {
         sessions.push(currentSession);
       }
-      
-      // Sort sessions by start time (most recent first)
+
       sessions.reverse();
-      
-      logger.debug('Sessions grouped', { total: sessions.length });
-      
-      // Calculate additional stats and clean up
-      const result = sessions.slice(0, limit).map(session => {
+
+      const normalizedSessions = sessions.slice(0, normalizedLimit).map((session, index) => {
         const durationMs = session.endTime - session.startTime;
         const durationMinutes = Math.round(durationMs / 60000);
         const wonHands = session.hands.filter(h => (h.heroNet || 0) > 0.005).length;
         const lostHands = session.hands.filter(h => (h.heroNet || 0) < -0.005).length;
         const winRate = session.handCount > 0 ? (wonHands / session.handCount * 100) : 0;
-        
+
         return {
-          sessionId: session.sessionId,
+          id: `session_${index + 1}`,
           startTime: session.startTime,
           endTime: session.endTime,
-          duration: durationMinutes,
-          handCount: session.handCount,
-          netProfit: Math.round(session.netProfit * 100) / 100,
-          stakes: session.stakes,
+          durationMinutes,
+          hands: session.handCount,
+          totalWon: Math.round(session.netProfit * 100) / 100,
+          avgStake: session.stakes,
+          bestHand: Math.round(session.bestHand * 100) / 100,
+          worstHand: Math.round(session.worstHand * 100) / 100,
           wonHands,
           lostHands,
           winRate: Math.round(winRate * 10) / 10,
-          bestHand: Math.round(session.bestHand * 100) / 100,
-          worstHand: Math.round(session.worstHand * 100) / 100,
           handsPerHour: durationMinutes > 0 ? Math.round((session.handCount / durationMinutes) * 60) : 0
         };
       });
-      
-      logger.info('Sessions list generated', { sessions: result.length });
-      return result;
+
+      logger.info('Sessions list generated', { sessions: normalizedSessions.length });
+      return normalizedSessions;
     } catch (err) {
       logger.error('Failed to get sessions list', { error: err.message });
       return [];
@@ -166,9 +209,8 @@ function registerSessionsHandlers(ipcMain, db) {
       const { sessionGapMinutes = 30 } = params;
       const sessionGapMs = sessionGapMinutes * 60 * 1000;
 
-      // Get all hands ordered by timestamp
       const hands = db.prepare(`
-        SELECT id, ts, heroNet, bb, sb, tableName, json
+        SELECT id, ts, heroNet, bb, sb, tableName, json, hero
         FROM hands
         WHERE sb > 0 AND bb > 0 AND sb <= bb
         ORDER BY ts ASC
@@ -178,7 +220,8 @@ function registerSessionsHandlers(ipcMain, db) {
         return { success: true, sessions: [] };
       }
 
-      // Detect sessions based on time gaps
+      const heroName = deriveHeroNameFromHands(hands);
+
       const sessions = [];
       let currentSession = {
         id: 1,
@@ -193,12 +236,10 @@ function registerSessionsHandlers(ipcMain, db) {
         const timeSinceLastHand = hand.ts - currentSession.endTime;
 
         if (timeSinceLastHand <= sessionGapMs) {
-          // Same session
           currentSession.endTime = hand.ts;
           currentSession.hands.push(hand);
           currentSession.handIds.push(hand.id);
         } else {
-          // New session - save current and start new
           sessions.push(currentSession);
           currentSession = {
             id: sessions.length + 1,
@@ -209,24 +250,16 @@ function registerSessionsHandlers(ipcMain, db) {
           };
         }
       }
-      // Don't forget the last session
       sessions.push(currentSession);
 
-      // Calculate statistics for each session
       const sessionsWithStats = sessions.map(session => {
         const { hands: sessionHands, handIds } = session;
-        
-        // Aggregate using our unified pipeline
-        const stats = aggregateHandsForReports(sessionHands);
-        
-        // Calculate duration
+        const stats = aggregateHandsForReports(sessionHands, heroName);
         const durationMs = session.endTime - session.startTime;
         const durationMinutes = Math.round(durationMs / 60000);
-        
-        // Format dates
         const startDate = new Date(session.startTime);
         const endDate = new Date(session.endTime);
-        
+
         return {
           id: session.id,
           startTime: session.startTime,
@@ -236,13 +269,9 @@ function registerSessionsHandlers(ipcMain, db) {
           durationMinutes,
           hands: stats.hands,
           handIds,
-          
-          // Financial stats
           totalWon: Math.round(stats.totalWon * 100) / 100,
           totalBB: stats.totalBB,
           bb_per_100: stats.totalBB > 0 ? Math.round((stats.totalWon * 100 / stats.totalBB) * 100) / 100 : 0,
-          
-          // Playing stats
           vpip: stats.hands > 0 ? Math.round((stats.VPIP / stats.hands) * 100 * 10) / 10 : 0,
           pfr: stats.PFR_opp > 0 ? Math.round((stats.PFR / stats.PFR_opp) * 100 * 10) / 10 : 0,
           threeBet: stats.ThreeBet_opp > 0 ? Math.round((stats.ThreeBet / stats.ThreeBet_opp) * 100 * 10) / 10 : 0,
@@ -266,41 +295,81 @@ function registerSessionsHandlers(ipcMain, db) {
   });
 
   // sessions:details - Get detailed stats for a specific session
-  ipcMain.handle('sessions:details', async (_event, sessionId, handIds) => {
+  ipcMain.handle('sessions:details', async (_event, payloadOrSessionId, maybeHandIds) => {
     try {
-      if (!handIds || handIds.length === 0) {
-        return { success: false, error: 'No hand IDs provided' };
+      const request = (payloadOrSessionId && typeof payloadOrSessionId === 'object' && !Array.isArray(payloadOrSessionId))
+        ? (payloadOrSessionId || {})
+        : { sessionId: payloadOrSessionId, handIds: maybeHandIds };
+
+      const handIds = Array.isArray(request.handIds) ? request.handIds : [];
+      const sessionId = request.sessionId ?? null;
+
+      let hands = [];
+      if (handIds.length > 0) {
+        const placeholders = handIds.map(() => '?').join(',');
+        hands = db.prepare(`
+          SELECT id, ts, heroNet, bb, sb, tableName, json, hero
+          FROM hands
+          WHERE id IN (${placeholders})
+          ORDER BY ts ASC
+        `).all(...handIds);
       }
 
-      // Get all hands for this session
-      const placeholders = handIds.map(() => '?').join(',');
-      const hands = db.prepare(`
-        SELECT id, ts, heroNet, bb, sb, tableName, json
-        FROM hands
-        WHERE id IN (${placeholders})
-        ORDER BY ts ASC
-      `).all(...handIds);
+      if (hands.length === 0) {
+        return {
+          success: true,
+          sessionId,
+          stats: {
+            hands: 0,
+            totalWon: 0,
+            bb_per_100: 0,
+            VPIP_pct: 0,
+            PFR_pct: 0,
+            ThreeBet_pct: 0,
+            CBetF_pct: 0,
+            WTSD_pct: 0
+          },
+          overview: {
+            hands: 0,
+            totalWon: 0,
+            bb_per_100: 0,
+            vpip: 0,
+            pfr: 0,
+            threeBet: 0,
+            cbet: 0,
+            wtsd: 0
+          },
+          positionStats: {},
+          byPosition: {},
+          stakeBreakdown: [],
+          byStake: [],
+          handIds: []
+        };
+      }
 
-      // Aggregate stats
-      const stats = aggregateHandsForReports(hands);
+      const heroName = deriveHeroNameFromHands(hands);
+      const stats = aggregateHandsForReports(hands, heroName);
 
-      // Group by position
       const positionStats = {};
       const positions = ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
-      
+
       positions.forEach(pos => {
         const posHands = hands.filter(h => {
           try {
             const hand = JSON.parse(h.json);
-            const heroName = hand.hero;
-            return hand.positions?.[heroName] === pos;
+            const resolvedHero = hand.hero || heroName;
+            if (hand.positions && resolvedHero && hand.positions[resolvedHero]) {
+              return hand.positions[resolvedHero] === pos;
+            }
+            const heroPlayer = hand.players?.find(p => p?.name === resolvedHero);
+            return heroPlayer?.position === pos;
           } catch {
             return false;
           }
         });
 
         if (posHands.length > 0) {
-          const posStats = aggregateHandsForReports(posHands);
+          const posStats = aggregateHandsForReports(posHands, heroName);
           positionStats[pos] = {
             hands: posStats.hands,
             bb_per_100: posStats.totalBB > 0 ? Math.round((posStats.totalWon * 100 / posStats.totalBB) * 100) / 100 : 0,
@@ -311,7 +380,6 @@ function registerSessionsHandlers(ipcMain, db) {
         }
       });
 
-      // Group by stake
       const stakeStats = {};
       hands.forEach(h => {
         const stake = `${h.sb}/${h.bb}`;
@@ -322,7 +390,7 @@ function registerSessionsHandlers(ipcMain, db) {
       });
 
       const stakeBreakdown = Object.entries(stakeStats).map(([stake, stakeHands]) => {
-        const stakeAgg = aggregateHandsForReports(stakeHands);
+        const stakeAgg = aggregateHandsForReports(stakeHands, heroName);
         return {
           stake,
           hands: stakeAgg.hands,
@@ -331,25 +399,42 @@ function registerSessionsHandlers(ipcMain, db) {
         };
       }).sort((a, b) => b.hands - a.hands);
 
+      const summary = {
+        hands: stats.hands,
+        totalWon: Math.round(stats.totalWon * 100) / 100,
+        bb_per_100: stats.totalBB > 0 ? Math.round((stats.totalWon * 100 / stats.totalBB) * 100) / 100 : 0,
+        VPIP_pct: stats.hands > 0 ? Math.round((stats.VPIP / stats.hands) * 100 * 10) / 10 : 0,
+        PFR_pct: stats.PFR_opp > 0 ? Math.round((stats.PFR / stats.PFR_opp) * 100 * 10) / 10 : 0,
+        ThreeBet_pct: stats.ThreeBet_opp > 0 ? Math.round((stats.ThreeBet / stats.ThreeBet_opp) * 100 * 10) / 10 : 0,
+        CBetF_pct: stats.CBetF_opp > 0 ? Math.round((stats.CBetF / stats.CBetF_opp) * 100 * 10) / 10 : 0,
+        WTSD_pct: stats.WTSD_opp > 0 ? Math.round((stats.WTSD / stats.WTSD_opp) * 100 * 10) / 10 : 0
+      };
+
+      const overview = {
+        hands: summary.hands,
+        totalWon: summary.totalWon,
+        bb_per_100: summary.bb_per_100,
+        vpip: summary.VPIP_pct,
+        pfr: summary.PFR_pct,
+        threeBet: summary.ThreeBet_pct,
+        cbet: summary.CBetF_pct,
+        wtsd: summary.WTSD_pct
+      };
+
       logger.info('Session details generated', { sessionId, hands: hands.length });
       return {
         success: true,
         sessionId,
-        overview: {
-          hands: stats.hands,
-          totalWon: Math.round(stats.totalWon * 100) / 100,
-          bb_per_100: stats.totalBB > 0 ? Math.round((stats.totalWon * 100 / stats.totalBB) * 100) / 100 : 0,
-          vpip: stats.hands > 0 ? Math.round((stats.VPIP / stats.hands) * 100 * 10) / 10 : 0,
-          pfr: stats.PFR_opp > 0 ? Math.round((stats.PFR / stats.PFR_opp) * 100 * 10) / 10 : 0,
-          threeBet: stats.ThreeBet_opp > 0 ? Math.round((stats.ThreeBet / stats.ThreeBet_opp) * 100 * 10) / 10 : 0,
-          cbet: stats.CBetF_opp > 0 ? Math.round((stats.CBetF / stats.CBetF_opp) * 100 * 10) / 10 : 0,
-          wtsd: stats.WTSD_opp > 0 ? Math.round((stats.WTSD / stats.WTSD_opp) * 100 * 10) / 10 : 0
-        },
+        stats: summary,
+        overview,
         positionStats,
-        stakeBreakdown
+        byPosition: positionStats,
+        stakeBreakdown,
+        byStake: stakeBreakdown,
+        handIds: hands.map(h => h.id)
       };
     } catch (err) {
-      logger.error('Failed to get session details', { error: err.message, sessionId });
+      logger.error('Failed to get session details', { error: err.message, sessionId: payloadOrSessionId });
       return { success: false, error: err.message };
     }
   });

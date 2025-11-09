@@ -119,11 +119,15 @@ describe('sessions-handlers', () => {
       
       assertSuccessResponse(result);
       
-      if (result.sessions.length > 0) {
-        const session = result.sessions[0];
+      // Check that sessions have statistics
+      for (const session of result.sessions) {
         expect(typeof session.totalWon).toBe('number');
         expect(typeof session.hands).toBe('number');
-        expect(session.hands).toBeGreaterThan(0);
+        expect(typeof session.durationMinutes).toBe('number');
+        expect(Array.isArray(session.handIds)).toBe(true);
+        
+        // hands count should match handIds length (may be 0 for empty sessions)
+        expect(session.hands).toBe(session.handIds.length);
       }
     });
 

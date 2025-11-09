@@ -17,6 +17,69 @@ function clearRangeCache() {
   handsLogger.info('Range cache cleared');
 }
 
+function normalizeSearchValue(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function encodeJsonStringValue(value) {
+  const normalized = normalizeSearchValue(value);
+  if (normalized == null) return null;
+  try {
+    const asJson = JSON.stringify(normalized);
+    return asJson.slice(1, -1);
+  } catch {
+    return null;
+  }
+}
+
+function makeContainsClause(snippet) {
+  if (!snippet) return null;
+  return {
+    sql: 'instr(LOWER(json), ?) > 0',
+    params: [snippet.toLowerCase()],
+  };
+}
+
+function makeAbsentClause(snippet) {
+  if (!snippet) return null;
+  return {
+    sql: 'instr(LOWER(json), ?) = 0',
+    params: [snippet.toLowerCase()],
+  };
+}
+
+function buildAdvancedFilterClause(filter) {
+  if (!filter || !filter.field) return null;
+  const field = String(filter.field).toLowerCase();
+  switch (field) {
+    case 'position': {
+      const encoded = encodeJsonStringValue(filter.value);
+      if (!encoded) return null;
+      return makeContainsClause(`"position":"${encoded}"`);
+    }
+    case 'villain': {
+      const encoded = encodeJsonStringValue(filter.value);
+      if (!encoded) return null;
+      return makeContainsClause(`"${encoded}"`);
+    }
+    case 'showdown': {
+      const value = normalizeSearchValue(filter.value);
+      if (!value) return null;
+      if (value.toLowerCase() === 'yes') {
+        return makeContainsClause('showdown');
+      }
+      if (value.toLowerCase() === 'no') {
+        return makeAbsentClause('showdown');
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
 function registerHandsHandlers(ipcMain, db) {
   // List hands with filters
   ipcMain.handle('hands:list', (e, options = {}) => {
@@ -104,30 +167,20 @@ function registerHandsHandlers(ipcMain, db) {
       // Advanced filters
       if (advancedFilters && Array.isArray(advancedFilters) && advancedFilters.length > 0) {
         const filterClauses = [];
-        advancedFilters.forEach(filter => {
-          if (!filter.enabled) return;
-          const { field, operator, value, not } = filter;
-          
-          const buildClause = () => {
-            switch (field) {
-              case 'position':
-                return `json LIKE '%"position":"${value}"%'`;
-              case 'villain':
-                return `json LIKE '%"${value}"%'`;
-              case 'showdown':
-                return value === 'yes' ? `json LIKE '%showdown%'` : `json NOT LIKE '%showdown%'`;
-              default:
-                return null;
-            }
-          };
-          
-          let clause = buildClause();
-          if (clause) {
-            if (not) clause = `NOT (${clause})`;
-            filterClauses.push(clause);
+        advancedFilters.forEach((filter) => {
+          if (!filter?.enabled) return;
+          const clauseData = buildAdvancedFilterClause(filter);
+          if (!clauseData) return;
+          let { sql: clauseSql, params: clauseParams = [] } = clauseData;
+          if (filter.not) {
+            clauseSql = `NOT (${clauseSql})`;
+          }
+          filterClauses.push(clauseSql);
+          if (clauseParams.length) {
+            params.push(...clauseParams);
           }
         });
-        
+
         if (filterClauses.length > 0) {
           clauses.push(`(${filterClauses.join(' AND ')})`);
         }

@@ -38,17 +38,30 @@ export function createTestDb() {
     );
 
     CREATE TABLE IF NOT EXISTS player_stats (
-      name TEXT PRIMARY KEY,
-      hands INTEGER DEFAULT 0,
-      vpip INTEGER DEFAULT 0,
-      pfr INTEGER DEFAULT 0,
-      af REAL DEFAULT 0,
-      wtsd INTEGER DEFAULT 0,
-      wmsd INTEGER DEFAULT 0,
-      tbets INTEGER DEFAULT 0,
-      fold_to_cbet INTEGER DEFAULT 0,
-      cbet INTEGER DEFAULT 0,
-      total_won REAL DEFAULT 0,
+      player TEXT PRIMARY KEY,
+      hands INTEGER NOT NULL DEFAULT 0,
+      VPIP_pct REAL DEFAULT 0,
+      PFR_pct REAL DEFAULT 0,
+      ThreeBet_pct REAL DEFAULT 0,
+      FourBet_pct REAL DEFAULT 0,
+      Squeeze_pct REAL DEFAULT 0,
+      WTSD_pct REAL DEFAULT 0,
+      WWSF_pct REAL DEFAULT 0,
+      AFq_pct REAL DEFAULT 0,
+      CBetF_pct REAL DEFAULT 0,
+      CBetT_pct REAL DEFAULT 0,
+      CBetR_pct REAL DEFAULT 0,
+      FoldToCBetF_pct REAL DEFAULT 0,
+      FoldToCBetT_pct REAL DEFAULT 0,
+      FoldToCBetR_pct REAL DEFAULT 0,
+      StealAtt INTEGER DEFAULT 0,
+      StealSucc_pct REAL DEFAULT 0,
+      CheckRaiseF INTEGER DEFAULT 0,
+      positional_json TEXT,
+      vs_hero_json TEXT,
+      samples_json TEXT,
+      confidence_json TEXT,
+      raw_json TEXT,
       updated_at INTEGER
     );
 
@@ -63,11 +76,17 @@ export function createTestDb() {
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      table_id TEXT NOT NULL,
-      started_at INTEGER NOT NULL,
+      id TEXT PRIMARY KEY,
+      table_id TEXT,
+      started_at INTEGER,
       ended_at INTEGER,
-      hands_played INTEGER DEFAULT 0
+      hands_played INTEGER DEFAULT 0,
+      startTime INTEGER,
+      endTime INTEGER,
+      hands INTEGER,
+      totalWon REAL,
+      avgStake TEXT,
+      createdAt INTEGER DEFAULT (strftime('%s', 'now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_hands_ts ON hands(ts);
@@ -98,15 +117,10 @@ export const sampleHands = [
         { name: 'Villain1', position: 'SB', stack: 8 },
         { name: 'Villain2', position: 'BB', stack: 12 }
       ],
-      streets: [
-        {
-          name: 'preflop',
-          actions: [
-            { player: 'TestHero', action: 'raise', amount: 0.15 },
-            { player: 'Villain1', action: 'fold' },
-            { player: 'Villain2', action: 'call', amount: 0.15 }
-          ]
-        }
+      actions: [
+        { player: 'TestHero', type: 'raise', amount: 0.15, street: 'preflop' },
+        { player: 'Villain1', type: 'fold', street: 'preflop' },
+        { player: 'Villain2', type: 'call', amount: 0.15, street: 'preflop' }
       ]
     })
   },
@@ -125,14 +139,9 @@ export const sampleHands = [
         { name: 'TestHero', position: 'CO', cards: ['Ac', 'Ks'], isHero: true, stack: 10 },
         { name: 'Villain1', position: 'BTN', stack: 8 }
       ],
-      streets: [
-        {
-          name: 'preflop',
-          actions: [
-            { player: 'TestHero', action: 'raise', amount: 0.15 },
-            { player: 'Villain1', action: 'call', amount: 0.15 }
-          ]
-        }
+      actions: [
+        { player: 'TestHero', type: 'raise', amount: 0.15, street: 'preflop' },
+        { player: 'Villain1', type: 'call', amount: 0.15, street: 'preflop' }
       ]
     })
   },
@@ -151,14 +160,9 @@ export const sampleHands = [
         { name: 'TestHero', position: 'BTN', cards: ['Ad', 'As'], isHero: true, stack: 20 },
         { name: 'Villain1', position: 'SB', stack: 15 }
       ],
-      streets: [
-        {
-          name: 'preflop',
-          actions: [
-            { player: 'TestHero', action: 'raise', amount: 0.30 },
-            { player: 'Villain1', action: 'call', amount: 0.30 }
-          ]
-        }
+      actions: [
+        { player: 'TestHero', type: 'raise', amount: 0.30, street: 'preflop' },
+        { player: 'Villain1', type: 'call', amount: 0.30, street: 'preflop' }
       ]
     })
   }
@@ -218,9 +222,44 @@ export function seedTestDb(db) {
 
   // Insert sample player stats
   db.prepare(`
-    INSERT INTO player_stats (name, hands, vpip, pfr, af, wtsd, wmsd, total_won, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run('TestHero', 100, 25, 20, 2.5, 30, 20, 150.50, Date.now());
+    INSERT INTO player_stats (
+      player, hands,
+      VPIP_pct, PFR_pct, WTSD_pct, WWSF_pct, AFq_pct,
+      CBetF_pct, CBetT_pct, CBetR_pct,
+      FoldToCBetF_pct, FoldToCBetT_pct, FoldToCBetR_pct,
+      ThreeBet_pct, FourBet_pct, Squeeze_pct,
+      StealAtt, StealSucc_pct, CheckRaiseF,
+      positional_json, vs_hero_json, samples_json, confidence_json, raw_json,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'SeedHero',
+    100,
+    25.0,
+    20.0,
+    30.0,
+    45.0,
+    2.5,
+    55.0,
+    42.0,
+    38.0,
+    40.0,
+    35.0,
+    30.0,
+    8.0,
+    2.0,
+    5.0,
+    10,
+    60.0,
+    3,
+    JSON.stringify({ BTN: { hands: 25 } }),
+    JSON.stringify({ villains: [] }),
+    JSON.stringify({ VPIP_pct: 100 }),
+    JSON.stringify({ VPIP_pct: 0.95 }),
+    JSON.stringify({ raw: true }),
+    Date.now()
+  );
 }
 
 /**

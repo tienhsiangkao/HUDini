@@ -5,7 +5,9 @@
   "main": "electron-main.cjs",
   "type": "module",
   "scripts": {
-    "start": "node scripts/start-electron.cjs .",
+    "start": "npm run rebuild:electron && node scripts/start-electron.cjs .",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:node": "npm rebuild better-sqlite3",
     "rebuild:native": "node scripts/rebuild-native.cjs",
     "parse:ndjson": "node parser_starter.js sample_hand.txt --ndjson",
     "validate": "node validate.js",

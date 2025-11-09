@@ -4,9 +4,58 @@
 const { logger } = require('../lib/logger.cjs');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { app } = require('electron');
 
 const uiLogger = logger.child('UIHandlers');
+
+const DEFAULT_WIDGET_CONFIG = {
+  widgets: [
+    { id: 'net_usd', visible: true },
+    { id: 'bb_100', visible: true },
+    { id: 'rake', visible: true },
+    { id: 'pre_rake', visible: true }
+  ]
+};
+
+function getDefaultWidgetConfig() {
+  return {
+    widgets: DEFAULT_WIDGET_CONFIG.widgets.map(widget => ({ ...widget }))
+  };
+}
+
+function resolveWidgetConfigPath() {
+  const overridePath = process.env.HUD_WIDGET_CONFIG_PATH;
+  if (overridePath) {
+    const resolved = path.resolve(overridePath);
+    return {
+      baseDir: path.dirname(resolved),
+      filePath: resolved
+    };
+  }
+
+  if (app && typeof app.getPath === 'function') {
+    const userDataPath = app.getPath('userData');
+    return {
+      baseDir: userDataPath,
+      filePath: path.join(userDataPath, 'widget-config.json')
+    };
+  }
+
+  if (process.env.VITEST) {
+    const testPath = path.join(os.tmpdir(), 'test-widget-config.json');
+    return {
+      baseDir: path.dirname(testPath),
+      filePath: testPath
+    };
+  }
+
+  const fallbackDir = path.join(os.tmpdir(), `hudini-${process.pid}`);
+  return {
+    baseDir: fallbackDir,
+    filePath: path.join(fallbackDir, 'widget-config.json')
+  };
+}
 
 function registerUIHandlers(ipcMain, hudManager) {
   // Get HUD v3 status
@@ -51,53 +100,37 @@ function registerUIHandlers(ipcMain, hudManager) {
   // Get widget configuration
   ipcMain.handle('widgets:getConfig', async () => {
     try {
-      const userDataPath = app.getPath('userData');
-      const configPath = path.join(userDataPath, 'widget-config.json');
-      
-      // Default configuration
-      const defaultConfig = {
-        widgets: [
-          { id: 'net_usd', visible: true },
-          { id: 'bb_100', visible: true },
-          { id: 'rake', visible: true },
-          { id: 'pre_rake', visible: true }
-        ]
-      };
+      const { baseDir, filePath } = resolveWidgetConfigPath();
       
       // Try to load saved config
-      if (fs.existsSync(configPath)) {
-        const fileContent = fs.readFileSync(configPath, 'utf8');
+      if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf8');
         const savedConfig = JSON.parse(fileContent);
+        const widgets = Array.isArray(savedConfig.widgets)
+          ? savedConfig.widgets
+          : getDefaultWidgetConfig().widgets;
+        const config = { ...savedConfig, widgets };
         
         uiLogger.info('Loaded widget config from disk', { 
-          widgetCount: savedConfig.widgets?.length || 0,
-          path: configPath 
+          widgetCount: config.widgets.length,
+          path: filePath 
         });
         
-        return { success: true, config: savedConfig };
+        return { success: true, config };
       }
       
-      // Return default config if no saved config exists
       uiLogger.info('Using default widget config', { 
-        widgetCount: defaultConfig.widgets.length 
+        widgetCount: DEFAULT_WIDGET_CONFIG.widgets.length 
       });
       
-      return { success: true, config: defaultConfig };
+      return { success: true, config: getDefaultWidgetConfig() };
     } catch (err) {
       uiLogger.error('Failed to get widget config', { error: err.message });
       
-      // Return default config on error
       return {
         success: false,
         error: err.message,
-        config: {
-          widgets: [
-            { id: 'net_usd', visible: true },
-            { id: 'bb_100', visible: true },
-            { id: 'rake', visible: true },
-            { id: 'pre_rake', visible: true }
-          ]
-        }
+        config: getDefaultWidgetConfig()
       };
     }
   });
@@ -105,23 +138,30 @@ function registerUIHandlers(ipcMain, hudManager) {
   // Save widget configuration
   ipcMain.handle('widgets:saveConfig', async (_event, config) => {
     try {
-      const userDataPath = app.getPath('userData');
-      const configPath = path.join(userDataPath, 'widget-config.json');
+      if (!config || typeof config !== 'object') {
+        return { success: false, error: 'config payload is required' };
+      }
+
+      const normalizedConfig = Array.isArray(config.widgets)
+        ? { ...config, widgets: config.widgets.map(widget => ({ ...widget })) }
+        : getDefaultWidgetConfig();
+
+      const { baseDir, filePath } = resolveWidgetConfigPath();
       
       // Ensure directory exists
-      if (!fs.existsSync(userDataPath)) {
-        fs.mkdirSync(userDataPath, { recursive: true });
+      if (!fs.existsSync(baseDir)) {
+        fs.mkdirSync(baseDir, { recursive: true });
       }
       
       // Write config to disk
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8');
+      fs.writeFileSync(filePath, JSON.stringify(normalizedConfig, null, 2), 'utf8');
       
       uiLogger.info('Saved widget config to disk', { 
-        widgetCount: config.widgets?.length || 0,
-        path: configPath 
+        widgetCount: normalizedConfig.widgets?.length || 0,
+        path: filePath 
       });
       
-      return { success: true };
+      return { success: true, message: 'Widget configuration saved', config: normalizedConfig };
     } catch (err) {
       uiLogger.error('Failed to save widget config', { error: err.message });
       return { success: false, error: err.message };
