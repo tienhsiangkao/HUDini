@@ -5,19 +5,34 @@
   "main": "electron-main.cjs",
   "type": "module",
   "scripts": {
-    "start": "electron .",
+    "start": "node scripts/start-electron.cjs .",
+    "rebuild:native": "node scripts/rebuild-native.cjs",
     "parse:ndjson": "node parser_starter.js sample_hand.txt --ndjson",
     "validate": "node validate.js",
     "check:sample": "node parser_starter.js sample_hand.txt --ndjson | node validate.js",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:coverage": "vitest --coverage",
     "test:metrics": "node metrics_core.test.js",
-    "test:graph": "electron scripts/verify-hero-graph.cjs"
+    "test:graph": "electron scripts/verify-hero-graph.cjs",
+    "cleanup": "node cleanup.js",
+    "optimize": "node cleanup.js && sqlite3 hands.db < database_indexes.sql",
+    "lint:repo": "node scripts/check-repo-hygiene.cjs",
+    "db:clear": "node scripts/clear-database.cjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
     "chart.js": "^4.5.1",
-    "electron": "^31.7.7",
+    "electron": "^38.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sharp": "^0.34.4",
+    "tesseract.js": "^6.0.1",
     "yauzl": "^2.10.0"
+  },
+  "devDependencies": {
+    "electron-rebuild": "^3.2.9",
+    "vitest": "^2.1.5",
+    "@vitest/coverage-v8": "^2.1.5"
   }
 }

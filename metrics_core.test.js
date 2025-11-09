@@ -1,8 +1,7 @@
 // metrics_core.test.js
 // Basic regression test for computeMetrics aggregation.
 
-import assert from 'node:assert/strict';
-
+import { describe, test, expect } from 'vitest';
 import { computeMetrics } from './lib/metrics_core.js';
 
 function buildSampleHand() {
@@ -33,20 +32,22 @@ function buildSampleHand() {
   };
 }
 
-const [heroRow, villainRow] = computeMetrics([buildSampleHand()]);
+describe('Metrics Core', () => {
+  test('should compute player metrics correctly', () => {
+    const [heroRow, villainRow] = computeMetrics([buildSampleHand()]);
 
-assert.equal(heroRow.player, 'Hero');
-assert.equal(heroRow.hands, 1);
-assert.equal(heroRow.VPIP_pct, 100);
-assert.equal(heroRow.PFR_pct, 100);
-assert.equal(heroRow.CBetF_pct, 100);
-assert.equal(heroRow.FoldToCBetT_pct, 100);
-assert.equal(heroRow.WTSD_pct, 0);
+    expect(heroRow.player).toBe('Hero');
+    expect(heroRow.hands).toBe(1);
+    expect(heroRow.VPIP_pct).toBe(100);
+    expect(heroRow.PFR_pct).toBe(100);
+    expect(heroRow.CBetF_pct).toBe(100);
+    expect(heroRow.FoldToCBetT_pct).toBe(100);
+    expect(heroRow.WTSD_pct).toBe(0);
 
-assert.equal(villainRow.player, 'Villain');
-assert.equal(villainRow.hands, 1);
-assert.equal(villainRow.VPIP_pct, 100);
-assert.equal(villainRow.PFR_pct, 0);
-assert.equal(villainRow.WWSF_pct, 100);
-
-console.log('metrics_core.test.js passed');
+    expect(villainRow.player).toBe('Villain');
+    expect(villainRow.hands).toBe(1);
+    expect(villainRow.VPIP_pct).toBe(100);
+    expect(villainRow.PFR_pct).toBe(0);
+    expect(villainRow.WWSF_pct).toBe(100);
+  });
+});

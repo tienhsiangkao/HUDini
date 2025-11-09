@@ -1,4 +1,4 @@
-// db_import.js
+﻿// db_import.js
 // Import poker hand histories from folders into hands.db
 
 import fs from 'node:fs';
@@ -15,6 +15,67 @@ import { parseHandsText, assignPositions, computeStreetPots } from './parser_sta
 import metricsHelpers from './lib/hand_utils.cjs';
 
 const { getHeroName, parseTimestamp, computeHeroNetFromJson } = metricsHelpers;
+
+// Live tracker integration - will be set from electron-main
+let liveTrackerCallback = null;
+
+export function setLiveTrackerCallback(callback) {
+  liveTrackerCallback = callback;
+}
+
+// Feed parsed hand to live tracker
+function feedHandToLiveTracker(hand) {
+  if (!liveTrackerCallback || !hand) return;
+  
+  try {
+    const tableId = 'main'; // For now, single table
+    const { players = [], actions = [] } = hand;
+    
+    // Build seat number map
+    const seatMap = new Map();
+    players.forEach(p => {
+      if (p.seat != null && p.name) {
+        seatMap.set(p.name, p.seat);
+      }
+    });
+    
+    // Track each action
+    actions.forEach(action => {
+      if (!action || !action.player) return;
+      
+      const seatNumber = seatMap.get(action.player);
+      if (seatNumber == null) return;
+      
+      const street = action.street || 'preflop';
+      const actionType = action.type || 'unknown';
+      const amount = action.amount || action.contribution || 0;
+      
+      // Determine if this is a blind post
+      const isBlinds = actionType === 'posts' || actionType === 'post';
+      
+      // Track the action
+      if (street === 'preflop') {
+        liveTrackerCallback('trackPreflopAction', tableId, seatNumber, actionType, amount, isBlinds);
+      } else if (['flop', 'turn', 'river'].includes(street)) {
+        liveTrackerCallback('trackPostflopAction', tableId, seatNumber, street, actionType, amount);
+      }
+    });
+    
+    // Track hand completion for each player
+    players.forEach(player => {
+      if (!player || player.seat == null) return;
+      
+      const wentToShowdown = player.showdown || false;
+      const won = player.won || false;
+      const netAmount = player.net || 0;
+      
+      liveTrackerCallback('trackHandComplete', tableId, player.seat, wentToShowdown, won, netAmount);
+    });
+    
+  } catch (error) {
+    console.error('[Live Tracker] Error feeding hand:', error);
+  }
+}
 const gunzipAsync = promisify(zlib.gunzip);
 const requireFn = createRequire(import.meta.url);
 let yauzlModule;
@@ -168,8 +229,18 @@ async function processZipFile(zipPath, insert) {
                   const normalized = [];
                   for (const hand of parsedHands) {
                     if (!hand) continue;
-                    try { assignPositions(hand); } catch {}
-                    try { computeStreetPots(hand); } catch {}
+                    try { 
+                      assignPositions(hand); 
+                    } catch (err) {
+                      // Non-critical: position assignment can fail for malformed hands
+                      console.warn(`Failed to assign positions for hand ${hand.id}:`, err.message);
+                    }
+                    try { 
+                      computeStreetPots(hand); 
+                    } catch (err) {
+                      // Non-critical: pot calculation can fail for incomplete hand data
+                      console.warn(`Failed to compute pots for hand ${hand.id}:`, err.message);
+                    }
                     const row = formatHandRow(hand);
                     if (row) normalized.push(row);
                   }
@@ -527,6 +598,12 @@ export async function runImport(folders, onProgress = () => {}, opts = {}) {
           if (!hand) continue;
           try { assignPositions(hand); } catch {}
           try { computeStreetPots(hand); } catch {}
+          
+          // Feed to live tracker if enabled (for real-time stats)
+          if (liveTrackerCallback && opts.autoImport) {
+            try { feedHandToLiveTracker(hand); } catch {}
+          }
+          
           const row = formatHandRow(hand);
           if (row) normalized.push(row);
         }

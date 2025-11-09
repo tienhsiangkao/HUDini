@@ -21,12 +21,24 @@ function* streamHands(db) {
     let parsed;
     try {
       parsed = JSON.parse(row.json);
-    } catch {
+    } catch (err) {
+      // Skip malformed JSON - this is expected for corrupted data
+      console.warn('Failed to parse hand JSON:', err.message);
       continue;
     }
     if (!parsed) continue;
-    try { assignPositions(parsed); } catch {}
-    try { computeStreetPots(parsed); } catch {}
+    try { 
+      assignPositions(parsed); 
+    } catch (err) {
+      // Non-critical: continue without positions
+      console.warn(`Failed to assign positions for hand ${parsed.id}:`, err.message);
+    }
+    try { 
+      computeStreetPots(parsed); 
+    } catch (err) {
+      // Non-critical: continue without pot calculations
+      console.warn(`Failed to compute pots for hand ${parsed.id}:`, err.message);
+    }
     yield parsed;
   }
 }
@@ -55,17 +67,24 @@ export function buildStats(options = {}) {
       updated_at TEXT NOT NULL
     );
   `);
-  const extraColumns = [
+  // Whitelist for allowed column additions (security: prevent SQL injection)
+  const ALLOWED_COLUMNS = new Map([
     ['positional_json', 'TEXT'],
     ['vs_hero_json', 'TEXT'],
     ['samples_json', 'TEXT'],
     ['confidence_json', 'TEXT'],
     ['raw_json', 'TEXT'],
-  ];
-  for (const [col, type] of extraColumns) {
+  ]);
+  
+  for (const [col, type] of ALLOWED_COLUMNS.entries()) {
     try {
       db.exec(`ALTER TABLE player_stats ADD COLUMN ${col} ${type}`);
-    } catch {}
+    } catch (err) {
+      // Expected if column already exists
+      if (!err.message || !err.message.includes('duplicate column')) {
+        console.error(`Unexpected error adding column ${col}:`, err.message);
+      }
+    }
   }
 
   let result;

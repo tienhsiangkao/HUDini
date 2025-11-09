@@ -396,15 +396,42 @@ function parseBlock(block) {
   }
 
   const board = {};
-  const flopRe = /^\*\*\*\s+FLOP\s+\*\*\*\s+\[([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])]/m;
-  const turnRe = /^\*\*\*\s+TURN\s+\*\*\*\s+\[[^\]]+]\s+\[([2-9TJQKA][cdhs])]/m;
-  const riverRe = /^\*\*\*\s+RIVER\s+\*\*\*\s+\[[^\]]+]\s+\[([2-9TJQKA][cdhs])]/m;
+  // Updated to support "Run It Twice" hands with FIRST FLOP/TURN/RIVER
+  const flopRe = /^\*\*\*\s+(?:FIRST\s+)?FLOP\s+\*\*\*\s+\[([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])]/m;
+  const turnRe = /^\*\*\*\s+(?:FIRST\s+)?TURN\s+\*\*\*\s+\[[^\]]+]\s+\[([2-9TJQKA][cdhs])]/m;
+  const riverRe = /^\*\*\*\s+(?:FIRST\s+)?RIVER\s+\*\*\*\s+\[[^\]]+]\s+\[([2-9TJQKA][cdhs])]/m;
   const flopM = block.match(flopRe);
   if (flopM) board.flop = [flopM[1], flopM[2], flopM[3]];
   const turnM = block.match(turnRe);
   if (turnM) board.turn = turnM[1];
   const riverM = block.match(riverRe);
   if (riverM) board.river = riverM[1];
+  
+  // Check for "Run It Twice" - capture both boards from summary
+  const runItTwiceMatch = block.match(/Hand was run (\w+) times/i);
+  if (runItTwiceMatch) {
+    // Parse FIRST Board and SECOND Board from summary
+    const firstBoardMatch = block.match(/FIRST Board \[([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])\s+([2-9TJQKA][cdhs])]/);
+    const secondBoardMatch = block.match(/SECOND Board \[([2-9TJQKA][cdhs])]/); // Only river card shown
+    
+    if (firstBoardMatch) {
+      board.runItTwice = true;
+      board.firstBoard = {
+        flop: [firstBoardMatch[1], firstBoardMatch[2], firstBoardMatch[3]],
+        turn: firstBoardMatch[4],
+        river: firstBoardMatch[5]
+      };
+      
+      // For secondBoard, flop and turn are same as first, only river differs
+      if (secondBoardMatch) {
+        board.secondBoard = {
+          flop: [firstBoardMatch[1], firstBoardMatch[2], firstBoardMatch[3]],
+          turn: firstBoardMatch[4],
+          river: secondBoardMatch[1]
+        };
+      }
+    }
+  }
 
   const { actions, holeCards, summary } = parseActionsAndSummary(trimmed);
 

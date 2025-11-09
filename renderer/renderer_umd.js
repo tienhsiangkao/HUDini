@@ -59,35 +59,56 @@
       toast.style.paddingBottom = '15px';
     }
     
-    // Add action buttons if provided
-    let actions = '';
-    if (options.actions && Array.isArray(options.actions)) {
-      actions = '<div style="display: flex; gap: 6px; margin-left: auto;">';
-      options.actions.forEach(action => {
-        actions += `
-          <button onclick="this.dispatchEvent(new CustomEvent('toastAction', { detail: '${action.id}' }))" 
-                  style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); 
-                         color: white; padding: 4px 10px; border-radius: 4px; cursor: pointer; 
-                         font-size: 12px; font-weight: 600; transition: all 0.2s;">
-            ${action.label}
-          </button>
-        `;
-      });
-      actions += '</div>';
+    // Security: Build DOM safely to prevent XSS
+    const toastContent = document.createElement('div');
+    toastContent.style.display = 'flex';
+    toastContent.style.alignItems = 'center';
+    toastContent.style.gap = '12px';
+    toastContent.style.width = '100%';
+    
+    // Add icon (safe HTML)
+    if (icon) {
+      const iconSpan = document.createElement('span');
+      iconSpan.innerHTML = icon;
+      toastContent.appendChild(iconSpan);
     }
     
-    toast.innerHTML = icon + text + actions + progressBar;
+    // Add text (safe - using textContent)
+    const textSpan = document.createElement('span');
+    textSpan.textContent = typeof text === 'string' ? text : String(text);
+    textSpan.style.flex = '1';
+    toastContent.appendChild(textSpan);
     
-    // Handle action button clicks
-    if (options.actions) {
-      toast.addEventListener('toastAction', (e) => {
-        const action = options.actions.find(a => a.id === e.detail);
-        if (action && action.onClick) {
-          action.onClick();
-        }
-        // Auto-dismiss after action
-        removeToast(toast);
+    // Add action buttons if provided
+    if (options.actions && Array.isArray(options.actions)) {
+      const actionsDiv = document.createElement('div');
+      actionsDiv.style.display = 'flex';
+      actionsDiv.style.gap = '6px';
+      actionsDiv.style.marginLeft = 'auto';
+      
+      options.actions.forEach(action => {
+        const button = document.createElement('button');
+        button.textContent = action.label;
+        button.style.cssText = 'background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s;';
+        button.onclick = () => {
+          if (action.onClick) {
+            action.onClick();
+          }
+          removeToast(toast);
+        };
+        actionsDiv.appendChild(button);
       });
+      
+      toastContent.appendChild(actionsDiv);
+    }
+    
+    toast.appendChild(toastContent);
+    
+    // Add progress bar if requested
+    if (progressBar) {
+      const progressDiv = document.createElement('div');
+      progressDiv.innerHTML = progressBar;
+      toast.appendChild(progressDiv);
     }
     
     container.appendChild(toast);
@@ -139,105 +160,9 @@
       const progressBar = toast.querySelector('.toast-progress');
       if (progressBar) {
         progressBar.style.width = updates.progress + '%';
-  }
-}
-
-  function showConfirmPrompt(options = {}) {
-  return new Promise((resolve) => {
-    const {
-      title = 'Confirm',
-      message = '',
-      confirmLabel = 'Confirm',
-      cancelLabel = 'Cancel',
-      requiredText = null,
-    } = options || {};
-
-    const overlay = document.getElementById('confirm-overlay');
-    const modal = document.getElementById('confirm-modal');
-    const titleEl = document.getElementById('confirm-title');
-    const messageEl = document.getElementById('confirm-message');
-    const inputEl = document.getElementById('confirm-input');
-    const cancelBtn = document.getElementById('confirm-cancel');
-    const okBtn = document.getElementById('confirm-ok');
-
-    if (!overlay || !modal || !titleEl || !messageEl || !inputEl || !cancelBtn || !okBtn) {
-      const fallback = window.confirm(message || title);
-      resolve(fallback);
-      return;
-    }
-
-    const previousActive = document.activeElement;
-
-    titleEl.textContent = title;
-    messageEl.textContent = message;
-    cancelBtn.textContent = cancelLabel;
-    okBtn.textContent = confirmLabel;
-    inputEl.value = '';
-    if (requiredText) {
-      inputEl.placeholder = `Type ${requiredText}`;
-      inputEl.classList.add('show');
-      okBtn.disabled = true;
-    } else {
-      inputEl.placeholder = '';
-      inputEl.classList.remove('show');
-      okBtn.disabled = false;
-    }
-
-    function close(result) {
-      overlay.classList.remove('show');
-      cancelBtn.removeEventListener('click', onCancel);
-      okBtn.removeEventListener('click', onOk);
-      inputEl.removeEventListener('input', onInput);
-      document.removeEventListener('keydown', onKeyDown, true);
-      if (previousActive && typeof previousActive.focus === 'function') {
-        previousActive.focus();
-      }
-      resolve(result);
-    }
-
-    function onCancel(event) {
-      event.preventDefault();
-      close(false);
-    }
-
-    function onOk(event) {
-      event.preventDefault();
-      if (okBtn.disabled) return;
-      close(true);
-    }
-
-    function onInput() {
-      if (!requiredText) return;
-      const matches = inputEl.value.trim().toUpperCase() === requiredText.toUpperCase();
-      okBtn.disabled = !matches;
-    }
-
-    function onKeyDown(event) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close(false);
-      } else if (event.key === 'Enter') {
-        event.preventDefault();
-        if (!okBtn.disabled) close(true);
       }
     }
-
-    cancelBtn.addEventListener('click', onCancel);
-    okBtn.addEventListener('click', onOk);
-    inputEl.addEventListener('input', onInput);
-    document.addEventListener('keydown', onKeyDown, true);
-
-    overlay.classList.add('show');
-    setTimeout(() => {
-      if (requiredText) {
-        inputEl.focus();
-      } else {
-        okBtn.focus();
-      }
-    }, 0);
-  });
-}
-  window.showConfirmPrompt = showConfirmPrompt;
+    
     if (updates.type) {
       // Can change toast type/color
       const colors = { success: '#22c55e', error: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
@@ -2269,11 +2194,6 @@
       return () => { alive = false; };
     }, []);
 
-    const { data: dbCounts, loading: dbCountsLoading, error: dbCountsError } = useAsync(() => {
-      if (!window.api?.dbCounts) return null;
-      return window.api.dbCounts();
-    }, [bump]);
-
     const { data: playerCatalog } = useCachedAsync(
       () => window.api?.listStats({ limit: 1000, order: 'player', dir: 'asc' }) ?? null, 
       [bump],
@@ -2580,22 +2500,6 @@
     }, [heroName, focusRow, stakeData, positionData]);
 
     const detailRow = focusRow || fallbackHeroStats;
-    const heroRowForCounts = React.useMemo(() => {
-      if (!heroName) return null;
-      if (focusRow && namesEqual(focusRow.player, heroName)) return focusRow;
-      const direct = rows.find((row) => namesEqual(row.player, heroName));
-      if (direct) return direct;
-      return fallbackHeroStats || null;
-    }, [rows, focusRow, fallbackHeroStats, heroName]);
-    const heroHandsTotal = heroRowForCounts != null
-      ? Number(
-          heroRowForCounts.hands ??
-          heroRowForCounts.totalHands ??
-          heroRowForCounts?.overall?.hands ??
-          heroRowForCounts?.stats?.hands ??
-          0
-        ) || 0
-      : null;
 
     const toggleDetailSection = React.useCallback((key, next) => {
       setDetailCollapsed((prev) => ({ ...prev, [key]: next }));
@@ -3006,86 +2910,6 @@
 
     const stakePanel = renderBreakdown('Breakdown by Stake', displayStakeData, isStakeLoading, stakeError);
     const positionPanel = renderBreakdown('Breakdown by Position', displayPositionData, isPositionLoading, positionError);
-    const HAND_COUNT_TOLERANCE = 5;
-    const dbHandsTotal = Number(dbCounts?.hands || 0);
-    const statsHandsTotal = heroHandsTotal != null
-      ? heroHandsTotal
-      : (Number.isFinite(Number(dbCounts?.statsHands)) ? Number(dbCounts.statsHands) : null);
-    const statsLabel = heroHandsTotal != null ? 'Hero stats' : 'Player stats total';
-    const statsHandsDiff = heroHandsTotal != null ? heroHandsTotal - dbHandsTotal : null;
-    const statsHandsMismatch = heroHandsTotal != null && Math.abs(statsHandsDiff) > HAND_COUNT_TOLERANCE;
-    const statsHandsMissing = heroHandsTotal != null ? (heroHandsTotal <= HAND_COUNT_TOLERANCE && dbHandsTotal > HAND_COUNT_TOLERANCE) : false;
-    const countsSummary = React.useMemo(() => {
-      if (dbCountsError) {
-        return React.createElement('div', {
-          className: 'body',
-          style: {
-            marginBottom: 12,
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: '1px solid #f97316',
-            background: 'rgba(249,115,22,0.08)',
-            color: '#7c2d12',
-          }
-        }, `Unable to load database counts: ${dbCountsError.message || dbCountsError}`);
-      }
-      if (dbCountsLoading) {
-        return React.createElement('div', {
-          className: 'body',
-          style: {
-            marginBottom: 12,
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: '1px solid rgba(15,23,42,0.12)',
-            background: 'rgba(15,23,42,0.04)',
-            color: '#475569',
-          }
-        }, 'Loading database counts…');
-      }
-      if (!dbCounts && heroHandsTotal == null) return null;
-      const highlightStyle = { background: 'rgba(220,38,38,0.08)', border: '1px solid #dc2626', color: '#7f1d1d' };
-      const neutralStyle = { background: 'rgba(15,23,42,0.06)', border: '1px solid rgba(15,23,42,0.12)', color: '#1f2937' };
-      const bannerItems = [
-        React.createElement('div', { key: 'db', style: { fontWeight: 600 } }, `Hands in database: ${dbHandsTotal.toLocaleString()}`)
-      ];
-      if (statsHandsTotal != null) {
-        bannerItems.push(React.createElement('div', { key: 'stats', style: { fontWeight: 600 } }, `${statsLabel}: ${statsHandsTotal.toLocaleString()}`));
-      }
-      if (statsHandsMissing) {
-        bannerItems.push(React.createElement('div', {
-          key: 'warning',
-          style: { color: '#b91c1c', fontSize: 12, flexBasis: '100%' }
-        }, 'Hero stats are empty while hands exist in the database. Use Maintenance → Rebuild Stats to refresh aggregates.'));
-      } else if (statsHandsMismatch) {
-        bannerItems.push(React.createElement('div', {
-          key: 'mismatch',
-          style: { color: '#b91c1c', fontSize: 12, flexBasis: '100%' }
-        }, `Hero stats differ by ${statsHandsDiff > 0 ? '+' : ''}${Math.abs(statsHandsDiff).toLocaleString()} hands. Rebuild stats to resync.`));
-      } else if (heroHandsTotal != null && Math.abs(statsHandsDiff || 0) > 0) {
-        bannerItems.push(React.createElement('div', {
-          key: 'delta',
-          style: { color: '#475569', fontSize: 12, flexBasis: '100%' }
-        }, `Hero stats differ by ${statsHandsDiff > 0 ? '+' : ''}${Math.abs(statsHandsDiff || 0).toLocaleString()} hand${Math.abs(statsHandsDiff || 0) === 1 ? '' : 's'}, within the ±${HAND_COUNT_TOLERANCE} hand tolerance.`));
-      } else if (heroHandsTotal == null && Number.isFinite(Number(dbCounts?.statsHands))) {
-        bannerItems.push(React.createElement('div', {
-          key: 'note',
-          style: { color: '#475569', fontSize: 12, flexBasis: '100%' }
-        }, 'Player stats totals include all players. Select the hero to see hero-specific counts.'));
-      }
-      return React.createElement('div', {
-        className: 'body',
-        style: {
-          marginBottom: 12,
-          padding: '10px 12px',
-          borderRadius: 8,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 12,
-          alignItems: 'center',
-          ...((statsHandsMissing || statsHandsMismatch) ? highlightStyle : neutralStyle),
-        }
-      }, bannerItems.filter(Boolean));
-    }, [dbCounts, dbCountsError, dbCountsLoading, dbHandsTotal, HAND_COUNT_TOLERANCE, heroHandsTotal, statsHandsDiff, statsHandsMismatch, statsHandsMissing, statsHandsTotal, statsLabel]);
 
     const panelControlsBar = React.createElement('div', {
       style: {
@@ -3148,7 +2972,6 @@
     ]);
 
     return React.createElement(React.Fragment, null,
-      countsSummary,
       panelControlsBar,
       React.createElement(CollapsiblePanel, { 
         title: 'Player Stats', 
@@ -11627,11 +11450,13 @@
 
   function Dashboard({ globalFilters, setGlobalFilters }) {
     const React = window.React;
-   const bump = useDataUpdatedBump();
-   const ReactEl = React.createElement;
+    const bump = useDataUpdatedBump();
+    const ReactEl = React.createElement;
+    const DEFAULT_GRAPH_LIMIT = 10000;
     
-    // Merge global filters with Dashboard-specific filters (order, etc.)
+    // Merge global filters with Dashboard-specific filters (limit, order, etc.)
     const [graphFilters, setGraphFilters] = React.useState({
+      limit: DEFAULT_GRAPH_LIMIT,
       stake: 'all',
       position: 'all',
       showdown: 'all',
@@ -11801,11 +11626,6 @@
       return () => { alive = false; };
     }, []);
 
-    const { data: dbCounts, loading: dbCountsLoading, error: dbCountsError } = useAsync(() => {
-      if (!window.api?.dbCounts) return null;
-      return window.api.dbCounts();
-    }, [bump]);
-
     React.useEffect(() => {
       if (!window.__pub?.on) return undefined;
       const off = window.__pub.on('stats:compareUpdate', (payload) => setCompareSnapshot(payload || null));
@@ -11818,6 +11638,7 @@
     
     const request = React.useMemo(() => {
       const payload = {
+        limit: graphFilters.limit > 0 ? graphFilters.limit : 0,
         showdown: graphFilters.showdown,
         result: graphFilters.result,
         order: graphFilters.order,
@@ -11895,22 +11716,6 @@
     }, [heroStatsRow, bump, heroName]);
 
     const heroStatsForDisplay = heroStatsRow || heroStatsCache;
-    const HAND_COUNT_TOLERANCE = 5;
-    const firstFiniteNumber = (...values) => {
-      for (const value of values) {
-        const num = Number(value);
-        if (Number.isFinite(num)) return num;
-      }
-      return null;
-    };
-    const heroStatsHands = heroStatsForDisplay
-      ? firstFiniteNumber(
-          heroStatsForDisplay.hands,
-          heroStatsForDisplay.totalHands,
-          heroStatsForDisplay?.overall?.hands,
-          heroStatsForDisplay?.summary?.hands
-        )
-      : null;
     
     // Only show loading if fetching AND no cache exists
     const isHeroStatsLoading = heroStatsLoading && !heroStatsCache;
@@ -11920,24 +11725,10 @@
     const handTimeline = displayData?.timeline || [];
     const dailyTimeline = displayData?.daily || [];
     const rawTimeline = graphView === 'daily' ? dailyTimeline : handTimeline;
-    const matchingHands = Number(displayData?.eligibleCount ?? rawTimeline.length) || 0;
-    const totalHandsInDb = Number(dbCounts?.hands ?? displayData?.totalHands ?? matchingHands) || 0;
-    const hasActiveGraphFilters = Boolean(
-      (graphFilters.stake && graphFilters.stake !== 'all') ||
-      (graphFilters.position && graphFilters.position !== 'all') ||
-      (graphFilters.showdown && graphFilters.showdown !== 'all') ||
-      (graphFilters.result && graphFilters.result !== 'all') ||
-      (graphFilters.from && graphFilters.from.trim()) ||
-      (graphFilters.to && graphFilters.to.trim()) ||
-      (graphFilters.handRange && graphFilters.handRange !== 'all') ||
-      (graphFilters.stackDepth && graphFilters.stackDepth !== 'all') ||
-      (graphFilters.actionType && graphFilters.actionType !== 'all') ||
-      (graphFilters.potSize && graphFilters.potSize !== 'all') ||
-      (graphFilters.minBetSize && String(graphFilters.minBetSize).trim() !== '') ||
-      (graphFilters.maxBetSize && String(graphFilters.maxBetSize).trim() !== '')
-    );
-    const heroMismatchDiff = heroStatsHands != null ? heroStatsHands - matchingHands : 0;
-    const heroMismatch = !hasActiveGraphFilters && heroStatsHands != null && Math.abs(heroMismatchDiff) > HAND_COUNT_TOLERANCE;
+    const plotted = graphView === 'daily' ? dailyTimeline.length : displayData?.plotted ?? handTimeline.length;
+    const totalHands = graphView === 'daily'
+      ? dailyTimeline.reduce((sum, entry) => sum + (entry.hands || 0), 0)
+      : displayData?.totalHands ?? plotted;
 
     React.useEffect(() => {
       const previousLength = lastTimelineLength.current || 0;
@@ -11960,10 +11751,6 @@
 
     const effectiveCount = rawTimeline.length ? Math.max(1, Math.min(visibleCount || rawTimeline.length, rawTimeline.length)) : 0;
     const visibleTimeline = effectiveCount ? rawTimeline.slice(-effectiveCount) : rawTimeline;
-    const visibleDays = graphView === 'daily' ? visibleTimeline.length : 0;
-    const visibleHandsCount = graphView === 'daily'
-      ? visibleTimeline.reduce((sum, entry) => sum + (entry.hands || 0), 0)
-      : visibleTimeline.length;
 
     const MAX_GRAPH_POINTS = 3000;
     let chartTimeline = visibleTimeline;
@@ -12436,91 +12223,8 @@
 
     const sliderMax = rawTimeline.length || 1;
     const headerLabel = graphView === 'daily'
-      ? `Showing ${visibleDays.toLocaleString()} of ${dailyTimeline.length.toLocaleString()} days (${matchingHands.toLocaleString()} matching / ${totalHandsInDb.toLocaleString()} total)`
-      : `Showing ${visibleHandsCount.toLocaleString()} of ${matchingHands.toLocaleString()} hands (${totalHandsInDb.toLocaleString()} total)`;
-    const countsBanner = React.useMemo(() => {
-      if (dbCountsError) {
-        return ReactEl('div', {
-          className: 'body',
-          style: {
-            marginBottom: 12,
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: '1px solid #f97316',
-            background: 'rgba(249,115,22,0.08)',
-            color: '#7c2d12',
-          }
-        }, `Unable to load database counts: ${dbCountsError.message || dbCountsError}`);
-      }
-      if (dbCountsLoading) {
-        return ReactEl('div', {
-          className: 'body',
-          style: {
-            marginBottom: 12,
-            padding: '10px 12px',
-            borderRadius: 8,
-            border: '1px solid rgba(15,23,42,0.12)',
-            background: 'rgba(15,23,42,0.04)',
-            color: '#475569',
-          }
-        }, 'Loading database counts…');
-      }
-      const highlightStyle = { background: 'rgba(220,38,38,0.08)', border: '1px solid #dc2626', color: '#7f1d1d' };
-      const neutralStyle = { background: 'rgba(15,23,42,0.06)', border: '1px solid rgba(15,23,42,0.12)', color: '#1f2937' };
-      const bannerItems = [
-        ReactEl('div', { key: 'db', style: { fontWeight: 600 } }, `Hands in database: ${totalHandsInDb.toLocaleString()}`),
-        ReactEl('div', { key: 'graph', style: { fontWeight: 600 } },
-          `Hero graph (${hasActiveGraphFilters ? 'filtered' : 'all'}): ${matchingHands.toLocaleString()}`)
-      ];
-      if (heroStatsHands != null) {
-        bannerItems.push(ReactEl('div', { key: 'hero', style: { fontWeight: 600 } }, `Hero stats: ${heroStatsHands.toLocaleString()}`));
-      }
-      if (heroMismatch) {
-        bannerItems.push(ReactEl('div', {
-          key: 'warning',
-          style: { color: '#b91c1c', fontSize: 12, flexBasis: '100%' }
-        }, `Hero stats differ by ${heroMismatchDiff > 0 ? '+' : ''}${Math.abs(heroMismatchDiff).toLocaleString()} hands. Open Maintenance → Rebuild Stats to resync.`));
-      } else if (!hasActiveGraphFilters && heroStatsHands != null && Math.abs(heroMismatchDiff) > 0) {
-        bannerItems.push(ReactEl('div', {
-          key: 'tolerance',
-          style: { color: '#475569', fontSize: 12, flexBasis: '100%' }
-        }, `Hero stats differ by ${heroMismatchDiff > 0 ? '+' : ''}${Math.abs(heroMismatchDiff).toLocaleString()} hand${Math.abs(heroMismatchDiff) === 1 ? '' : 's'}, within the ±${HAND_COUNT_TOLERANCE} hand tolerance.`));
-      } else if (!hasActiveGraphFilters && heroStatsHands === 0 && totalHandsInDb > 0) {
-        bannerItems.push(ReactEl('div', {
-          key: 'empty',
-          style: { color: '#b45309', fontSize: 12, flexBasis: '100%' }
-        }, 'Hero stats are empty, but the database has hands. Rebuild stats to populate hero aggregates.'));
-      } else if (hasActiveGraphFilters && heroStatsHands != null) {
-        bannerItems.push(ReactEl('div', {
-          key: 'note',
-          style: { color: '#475569', fontSize: 12, flexBasis: '100%' }
-        }, 'Hero stats reflect lifetime totals; graph counts respect the current filters.'));
-      }
-      return ReactEl('div', {
-        className: 'body',
-        style: {
-          marginBottom: 12,
-          padding: '10px 12px',
-          borderRadius: 8,
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 12,
-          alignItems: 'center',
-          ...(heroMismatch ? highlightStyle : neutralStyle),
-        }
-      }, bannerItems.filter(Boolean));
-    }, [
-      dbCountsError,
-      dbCountsLoading,
-      ReactEl,
-      HAND_COUNT_TOLERANCE,
-      hasActiveGraphFilters,
-      heroMismatch,
-      heroMismatchDiff,
-      heroStatsHands,
-      matchingHands,
-      totalHandsInDb
-    ]);
+      ? `Loaded ${plotted} days (${totalHands.toLocaleString()} hands)`
+      : totalHands ? `Loaded ${plotted.toLocaleString()} hands (${totalHands.toLocaleString()} total in database)` : `Loaded ${plotted.toLocaleString()} hands`;
 
     // Export graph as PNG
     const exportGraphImage = () => {
@@ -12603,13 +12307,14 @@
         ReactEl(AnnotationManager, { onUpdate: () => setBump((prev) => prev + 1) }),
         // Opponent Analysis
         ReactEl(OpponentAnalysis),
-        countsBanner,
         ReactEl('div', {
           className: 'body',
           style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginBottom: 8 },
         }, [
           ReactEl('div', { className: 'muted' }, headerLabel),
           ReactEl('button', { type: 'button', onClick: exportGraphImage, style: { flex: '0 0 auto' } }, '📥 Export PNG'),
+          ReactEl('button', { type: 'button', onClick: () => setGraphFilters((prev) => ({ ...prev, limit: prev.limit > 0 ? prev.limit + 10000 : 10000 })), disabled: loading, style: { flex: '0 0 auto' } }, 'Load More'),
+          ReactEl('button', { type: 'button', onClick: () => setGraphFilters((prev) => ({ ...prev, limit: 0 })), disabled: loading, style: { flex: '0 0 auto' } }, 'Load All'),
           ReactEl('select', { value: graphFilters.stake, onChange: (ev) => handleFilterChange('stake')(ev.target.value), style: { flex: '0 0 160px' } }, [
             ReactEl('option', { value: 'all', key: 'all' }, 'All stakes'),
             ...(Array.isArray(displayData?.available?.stakes) ? displayData.available.stakes : []).map((opt) => ReactEl('option', { key: opt.key, value: opt.key }, opt.label || formatStakeLabel(opt.key))),
@@ -12650,6 +12355,7 @@
             type: 'button',
             onClick: () => {
               setGraphFilters({ 
+                limit: DEFAULT_GRAPH_LIMIT, 
                 stake: 'all', 
                 position: 'all', 
                 showdown: 'all', 
@@ -12904,58 +12610,6 @@
           if (progressToast) removeToast(progressToast);
           
           showToast(`✕ Restore failed: ${error.message || error}`, 'error', 5000);
-        }
-      }],
-      ['btn-clear-db', async () => {
-        try {
-          const promptFn = (typeof window !== 'undefined' && typeof window.showConfirmPrompt === 'function')
-            ? window.showConfirmPrompt
-            : (opts = {}) => Promise.resolve(window.confirm(opts.message || opts.title || 'Are you sure?'));
-          const proceed = await promptFn({
-            title: 'Clear Database',
-            message: 'This will permanently delete all imported hands, player stats, and live tracking data. Do you want to continue?',
-            confirmLabel: 'Continue',
-            cancelLabel: 'Cancel',
-          });
-          if (!proceed) {
-            showToast('Database clear cancelled', 'info', 2000);
-            return;
-          }
-          const confirmDelete = await promptFn({
-            title: 'Type DELETE to confirm',
-            message: 'Please type DELETE to confirm wiping the database.',
-            confirmLabel: 'Delete',
-            cancelLabel: 'Cancel',
-            requiredText: 'DELETE',
-          });
-          if (!confirmDelete) {
-            showToast('Database clear cancelled', 'info', 2000);
-            return;
-          }
-
-          showToast('Clearing database...', 'loading', 0, { id: 'clear-db-progress' });
-          const result = await window.api?.clearDatabase?.();
-
-          const container = document.getElementById('toast-container');
-          const progressToast = container && Array.from(container.children).find(t => t.__id === 'clear-db-progress');
-          if (progressToast) removeToast(progressToast);
-
-          if (result?.success) {
-            const cleared = result.cleared || {};
-            const lines = Object.entries(cleared)
-              .filter(([, count]) => typeof count === 'number' && count > 0)
-              .map(([table, count]) => `${table}: ${count.toLocaleString()}`);
-            const summary = lines.length ? lines.join('\n') : 'Database already empty';
-            showToast(`🧹 Database cleared\n${summary}`, 'success', 4000);
-            window.__pub?.emit('data-updated');
-          } else {
-            showToast(`⚠️ Clear failed: ${result?.error || 'Unknown error'}`, 'error', 5000);
-          }
-        } catch (error) {
-          const container = document.getElementById('toast-container');
-          const progressToast = container && Array.from(container.children).find(t => t.__id === 'clear-db-progress');
-          if (progressToast) removeToast(progressToast);
-          showToast(`⚠️ Clear failed: ${error?.message || error}`, 'error', 5000);
         }
       }],
     ];
