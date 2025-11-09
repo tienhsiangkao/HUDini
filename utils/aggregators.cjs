@@ -1,15 +1,37 @@
 /**
  * Aggregators Utilities
- * Functions for aggregating hand data and computing session/report statistics
+ * Functions for aggregating hand data and computing session/report statistics.
+ * Provides aggregation by date, stake, table, and comprehensive poker statistics
+ * including VPIP, PFR, 3-bet, C-bet, and WTSD calculations.
  */
 
 /**
- * Aggregate hands for reports and session analysis
- * Calculates VPIP, PFR, 3-bet, C-bet, WTSD statistics
+ * Aggregate hands for reports and session analysis with comprehensive poker statistics.
+ * Calculates VPIP (Voluntarily Put money In Pot), PFR (Pre-Flop Raise), 3-bet,
+ * C-bet (Continuation Bet), and WTSD (Went To ShowDown) percentages.
  * 
- * @param {Array} hands - Array of hand rows with json property
- * @param {string} heroName - Hero player name (default: 'Hero')
- * @returns {Object} Aggregated statistics
+ * @param {Array<object>} hands - Array of hand objects with json property containing parsed hand data
+ * @param {string} [heroName='Hero'] - Hero player name for statistics calculation
+ * @returns {object} Aggregated statistics object
+ * @property {number} hands - Total number of hands played
+ * @property {number} VPIP - Number of times hero voluntarily put money in pot preflop
+ * @property {number} PFR - Number of times hero raised preflop
+ * @property {number} PFR_opp - Number of preflop raise opportunities
+ * @property {number} ThreeBet - Number of 3-bets made
+ * @property {number} ThreeBet_opp - Number of 3-bet opportunities
+ * @property {number} CBetF - Number of flop continuation bets
+ * @property {number} CBetF_opp - Number of flop c-bet opportunities
+ * @property {number} WTSD - Number of times went to showdown
+ * @property {number} WTSD_opp - Number of showdown opportunities
+ * @property {number} totalWon - Total profit/loss in currency units
+ * @property {number} totalBB - Total big blinds played
+ * 
+ * @example
+ * const hands = db.prepare('SELECT * FROM hands WHERE hero = ?').all('PlayerName');
+ * const stats = aggregateHandsForReports(hands, 'PlayerName');
+ * console.log(`VPIP: ${(stats.VPIP / stats.hands * 100).toFixed(1)}%`);
+ * console.log(`PFR: ${(stats.PFR / stats.PFR_opp * 100).toFixed(1)}%`);
+ * console.log(`Total won: $${stats.totalWon.toFixed(2)}`);
  */
 function aggregateHandsForReports(hands, heroName = 'Hero') {
   const DECISION_PRE_ACTIONS = new Set(['call', 'raise', 'bet', 'fold', 'all-in', 'all_in']);
@@ -154,9 +176,21 @@ function aggregateHandsForReports(hands, heroName = 'Hero') {
 }
 
 /**
- * Aggregate hands by date for timeline charts
- * @param {Array} hands - Array of hand rows
- * @returns {Object} Date-keyed aggregation
+ * Aggregate hands by date for timeline charts and trend analysis.
+ * Groups hands by calendar date (YYYY-MM-DD) and calculates profit per date.
+ * 
+ * @param {Array<object>} hands - Array of hand objects with dateUTC or ts timestamp
+ * @returns {object} Date-keyed aggregation object
+ * @property {string} [date] - Date key in YYYY-MM-DD format
+ * @property {object} [date].hands - Number of hands played on this date
+ * @property {object} [date].profit - Total profit/loss for this date
+ * 
+ * @example
+ * const hands = db.prepare('SELECT * FROM hands ORDER BY dateUTC').all();
+ * const byDate = aggregateHandsByDate(hands);
+ * Object.entries(byDate).forEach(([date, stats]) => {
+ *   console.log(`${date}: ${stats.hands} hands, $${stats.profit.toFixed(2)}`);
+ * });
  */
 function aggregateHandsByDate(hands) {
   const byDate = {};
@@ -182,9 +216,23 @@ function aggregateHandsByDate(hands) {
 }
 
 /**
- * Aggregate hands by stake level
- * @param {Array} hands - Array of hand rows
- * @returns {Object} Stake-keyed aggregation
+ * Aggregate hands by stake level (small blind / big blind).
+ * Groups hands by stake key (e.g., "0.5/1") and calculates profit per stake.
+ * 
+ * @param {Array<object>} hands - Array of hand objects with sb (small blind) and bb (big blind) properties
+ * @returns {object} Stake-keyed aggregation object
+ * @property {string} [stake] - Stake key in "sb/bb" format (e.g., "0.5/1")
+ * @property {object} [stake].sb - Small blind amount
+ * @property {object} [stake].bb - Big blind amount
+ * @property {object} [stake].hands - Number of hands played at this stake
+ * @property {object} [stake].profit - Total profit/loss at this stake
+ * 
+ * @example
+ * const hands = db.prepare('SELECT * FROM hands').all();
+ * const byStake = aggregateHandsByStake(hands);
+ * Object.entries(byStake).forEach(([stake, stats]) => {
+ *   console.log(`${stake}: ${stats.hands} hands, $${stats.profit.toFixed(2)}`);
+ * });
  */
 function aggregateHandsByStake(hands) {
   const byStake = {};
@@ -211,9 +259,24 @@ function aggregateHandsByStake(hands) {
 }
 
 /**
- * Aggregate hands by table name
- * @param {Array} hands - Array of hand rows
- * @returns {Object} Table-keyed aggregation
+ * Aggregate hands by table name for multi-tabling analysis.
+ * Groups hands by table name and tracks session timing and profitability.
+ * 
+ * @param {Array<object>} hands - Array of hand objects with tableName and timestamp properties
+ * @returns {object} Table-keyed aggregation object
+ * @property {string} [tableName] - Table identifier
+ * @property {object} [tableName].hands - Number of hands played at this table
+ * @property {object} [tableName].profit - Total profit/loss at this table
+ * @property {object} [tableName].firstSeen - Timestamp of first hand at this table
+ * @property {object} [tableName].lastSeen - Timestamp of last hand at this table
+ * 
+ * @example
+ * const hands = db.prepare('SELECT * FROM hands WHERE ts > ?').all(Date.now() - 86400000);
+ * const byTable = aggregateHandsByTable(hands);
+ * Object.entries(byTable).forEach(([table, stats]) => {
+ *   const duration = (stats.lastSeen - stats.firstSeen) / 60000; // minutes
+ *   console.log(`${table}: ${stats.hands} hands over ${duration.toFixed(0)} minutes`);
+ * });
  */
 function aggregateHandsByTable(hands) {
   const byTable = {};

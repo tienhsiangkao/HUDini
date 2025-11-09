@@ -1,15 +1,28 @@
 /**
  * File Parsing Utilities
- * Utilities for detecting and decoding various file formats and poker room types
+ * Utilities for detecting and decoding various file formats and poker room types.
+ * Handles encoding detection (UTF-8, UTF-16), gzip decompression, poker room identification,
+ * and hand history validation for multiple poker sites (PokerStars, GGPoker, etc.).
  */
 
+/**
+ * Maximum characters to include in text previews.
+ * @constant
+ * @type {number}
+ */
 const MAX_PREVIEW_CHARS = 500;
 
 /**
- * Format buffer as hex string sample
- * @param {Buffer} buffer - Buffer to format
- * @param {number} bytes - Number of bytes to include (default: 32)
- * @returns {string} Hex string representation
+ * Format buffer as hexadecimal string sample for debugging.
+ * Useful for inspecting binary file formats and encoding issues.
+ * 
+ * @param {Buffer} buffer - Buffer to format as hex string
+ * @param {number} [bytes=32] - Number of bytes to include in sample
+ * @returns {string} Space-separated hex string (e.g., "1f 8b 08 00...")
+ * 
+ * @example
+ * const buffer = Buffer.from([0x1f, 0x8b, 0x08]);
+ * console.log(formatHexSample(buffer)); // "1f 8b 08"
  */
 function formatHexSample(buffer, bytes = 32) {
   if (!buffer || !buffer.length) return '';
@@ -18,18 +31,33 @@ function formatHexSample(buffer, bytes = 32) {
 }
 
 /**
- * Check if buffer is gzip-compressed
- * @param {Buffer} buffer - Buffer to check
- * @returns {boolean} True if gzip magic bytes present
+ * Check if buffer contains gzip-compressed data by inspecting magic bytes.
+ * Gzip files start with magic bytes 0x1f 0x8b.
+ * 
+ * @param {Buffer} buffer - Buffer to inspect
+ * @returns {boolean} True if buffer starts with gzip magic bytes
+ * 
+ * @example
+ * const gzipBuffer = fs.readFileSync('archive.gz');
+ * if (isGzipBuffer(gzipBuffer)) {
+ *   console.log('File is gzip-compressed');
+ * }
  */
 function isGzipBuffer(buffer) {
   return buffer && buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b;
 }
 
 /**
- * Detect text encoding from buffer BOM (Byte Order Mark)
- * @param {Buffer} buffer - Buffer to detect encoding from
- * @returns {string} Detected encoding ('utf-8', 'utf-16le', 'utf-16be')
+ * Detect text encoding from buffer Byte Order Mark (BOM).
+ * Supports UTF-8, UTF-16 LE (Little Endian), and UTF-16 BE (Big Endian).
+ * 
+ * @param {Buffer} buffer - Buffer to analyze for BOM
+ * @returns {string} Detected encoding: 'utf-8', 'utf-16le', or 'utf-16be'
+ * 
+ * @example
+ * const buffer = fs.readFileSync('hand_history.txt');
+ * const encoding = detectEncoding(buffer);
+ * const text = buffer.toString(encoding);
  */
 function detectEncoding(buffer) {
   if (!buffer || buffer.length < 2) return 'utf-8';
@@ -80,10 +108,16 @@ function decodeBuffer(buffer, encoding) {
 }
 
 /**
- * Normalize text preview by collapsing whitespace and trimming
+ * Normalize text preview by collapsing whitespace and trimming to maximum length.
+ * Useful for creating clean text previews of hand history files.
+ * 
  * @param {string} text - Text to normalize
- * @param {number} maxLen - Maximum length (default: 500)
- * @returns {string} Normalized text preview
+ * @param {number} [maxLen=500] - Maximum character length for preview
+ * @returns {string} Normalized text with collapsed whitespace and trimmed to max length
+ * 
+ * @example
+ * const preview = normalisePreview('Hand   #123\n\nTable:  NL25');
+ * console.log(preview); // "Hand #123 Table: NL25"
  */
 function normalisePreview(text, maxLen = MAX_PREVIEW_CHARS) {
   if (!text) return '';
@@ -91,9 +125,16 @@ function normalisePreview(text, maxLen = MAX_PREVIEW_CHARS) {
 }
 
 /**
- * Detect poker room from hand history text
- * @param {string} text - Hand history text
- * @returns {string} Detected room identifier
+ * Detect poker room/site from hand history text by pattern matching.
+ * Identifies PokerStars, GGPoker, Ignition, Bovada, PartyPoker, 888poker, Winamax formats.
+ * 
+ * @param {string} text - Hand history text content
+ * @returns {string} Poker room identifier: 'PokerStars', 'GG Rush & Cash', 'Ignition/Bovada', etc., or 'unknown'
+ * 
+ * @example
+ * const text = fs.readFileSync('hand.txt', 'utf8');
+ * const room = detectRoom(text);
+ * console.log(`Detected poker room: ${room}`);
  */
 function detectRoom(text) {
   if (!text) return 'unknown';
@@ -114,9 +155,19 @@ function detectRoom(text) {
 }
 
 /**
- * Check if text appears to be a valid hand history
- * @param {string} text - Text to validate
- * @returns {boolean} True if text looks like a hand history
+ * Check if text appears to be a valid hand history by looking for common patterns.
+ * Validates presence of hand number, player seat assignments, and action keywords.
+ * 
+ * @param {string} text - Text to validate as hand history
+ * @returns {boolean} True if text contains hand history patterns
+ * 
+ * @example
+ * const text = fs.readFileSync('suspected_hand.txt', 'utf8');
+ * if (isValidHandHistory(text)) {
+ *   console.log('Valid hand history file');
+ * } else {
+ *   console.log('Not a hand history');
+ * }
  */
 function isValidHandHistory(text) {
   if (!text || text.length < 50) return false;
@@ -147,9 +198,16 @@ function getFileExtension(filename) {
 }
 
 /**
- * Check if file extension is supported hand history format
+ * Check if file extension is a supported hand history format.
+ * Supported extensions: txt, hh, log, gz, zip.
+ * 
  * @param {string} filename - Filename to check
- * @returns {boolean} True if extension is supported
+ * @returns {boolean} True if file extension is supported for hand history parsing
+ * 
+ * @example
+ * isSupportedHandHistoryFile('hands.txt'); // true
+ * isSupportedHandHistoryFile('archive.gz'); // true
+ * isSupportedHandHistoryFile('document.pdf'); // false
  */
 function isSupportedHandHistoryFile(filename) {
   const ext = getFileExtension(filename);
@@ -158,9 +216,16 @@ function isSupportedHandHistoryFile(filename) {
 }
 
 /**
- * Sanitize filename for safe filesystem operations
+ * Sanitize filename for safe filesystem operations by removing dangerous characters.
+ * Removes path separators, wildcards, control characters, and limits length to 255 chars.
+ * 
  * @param {string} filename - Filename to sanitize
- * @returns {string} Sanitized filename
+ * @returns {string} Safe filename with dangerous characters replaced by underscores
+ * 
+ * @example
+ * sanitizeFilename('hand<>history?.txt'); // 'hand__history_.txt'
+ * sanitizeFilename('../../../etc/passwd'); // '______etc_passwd'
+ * sanitizeFilename('.hidden'); // 'hidden'
  */
 function sanitizeFilename(filename) {
   if (!filename || typeof filename !== 'string') return 'unnamed';
