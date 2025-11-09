@@ -9,6 +9,8 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { BrowserWindow } = require('electron');
 const { logger } = require('../lib/logger.cjs');
+const { clearRangeCache } = require('./hands-handlers.cjs');
+const { clearGraphCache } = require('../lib/hero_graph.cjs');
 
 // File watching state
 const watchedFolders = new Map(); // folder path -> FSWatcher instance
@@ -83,6 +85,10 @@ function registerImportHandlers(ipcMain, db, dbPath, dialog, win, rebuildPlayerS
       
       const res = await mod.runImport(folders, onProgress, { ...opts, db });
       logger.info(`Import complete: ${res?.totalHands || 0} hands processed`);
+      
+      // Invalidate caches after import
+      clearRangeCache();
+      clearGraphCache();
       
       const targetWin = win || BrowserWindow.getFocusedWindow();
       let statsRes = null;
@@ -448,6 +454,10 @@ function registerImportHandlers(ipcMain, db, dbPath, dialog, win, rebuildPlayerS
       // Mark as complete
       bulkImportState.active = false;
       logger.info('Bulk import complete');
+      
+      // Invalidate caches after bulk import
+      clearRangeCache();
+      clearGraphCache();
       
       // Send complete event
       if (targetWin) {

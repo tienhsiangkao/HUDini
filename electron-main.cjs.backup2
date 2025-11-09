@@ -1,0 +1,1218 @@
+﻿if (process?.env?.ELECTRON_RUN_AS_NODE) {
+  delete process.env.ELECTRON_RUN_AS_NODE;
+}
+const electronModule = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = electronModule;
+const path = require('path');
+const { pathToFileURL } = require('url');
+const fs = require('fs');
+const fsp = require('fs/promises');
+const zlib = require('zlib');
+const { createRequire } = require('module');
+const Database = require('better-sqlite3');
+const HUDOverlayV2 = require('./hud-overlay-v2.cjs');
+const { HUDManager } = require('./lib/hud_manager.cjs');
+const { namesEqual } = require('./lib/hand_utils.cjs');
+const { computeHeroHandMetrics } = require('./lib/hero_metrics.cjs');
+const { buildHeroGraphData } = require('./lib/hero_graph.cjs');
+const { fetchUnifiedHandCounts } = require('./lib/hand_counts.cjs');
+const { logger } = require('./lib/logger.cjs');
+
+// Utility modules
+const { 
+  fetchHandsForMetrics, 
+  computeHeroAggregatePercents, 
+  fetchLatestHeroName,
+  extractHandMetrics
+} = require('./utils/metrics.cjs');
+const { aggregateHandsForReports } = require('./utils/aggregators.cjs');
+const {
+  formatHexSample,
+  isGzipBuffer,
+  detectEncoding,
+  decodeBuffer,
+  normalisePreview,
+  detectRoom
+} = require('./utils/file-parsing.cjs');
+
+// Handler modules
+const { registerHandsHandlers } = require('./handlers/hands-handlers.cjs');
+const { registerStatsHandlers } = require('./handlers/stats-handlers.cjs');
+const { registerAnnotationsHandlers } = require('./handlers/annotations-handlers.cjs');
+const { registerSessionsHandlers } = require('./handlers/sessions-handlers.cjs');
+const { registerDbHandlers } = require('./handlers/db-handlers.cjs');
+const { registerImportHandlers } = require('./handlers/import-handlers.cjs');
+const { registerReportsHandlers } = require('./handlers/reports-handlers.cjs');
+let yauzl = null;
+try {
+  const requireFn = createRequire(__filename);
+  yauzl = requireFn('yauzl');
+} catch {}
+
+// File watching state
+const watchedFolders = new Map(); // folder path -> FSWatcher instance
+const pendingImports = new Map(); // file path -> timeout ID
+const IMPORT_DEBOUNCE_MS = 2000; // Wait 2s after file write before importing
+
+// Bulk import state
+const bulkImportState = {
+  active: false,
+  paused: false,
+  cancelled: false,
+  folders: [],
+  currentIndex: 0,
+  results: []
+};
+
+let win;
+let hudOverlay;
+let hudManager;
+let db;
+const TEXT_EXTENSIONS = new Set(['.txt', '.log', '.hh', '.dat', '.json', '.csv', '.gz', '.zip']);
+const MAX_PREVIEW_CHARS = 200;
+const MAX_FOLDER_SCAN_FILES = 2000;
+let parserModulePromise = null;
+let liveTrackerIntegrationSetup = false;
+
+// Setup live tracker integration with auto-import
+async function setupLiveTrackerIntegration() {
+  if (liveTrackerIntegrationSetup || !hudManager) return;
+  
+  try {
+    // Import db_import module dynamically
+    const url = pathToFileURL(path.join(__dirname, 'db_import.js')).href;
+    const dbImport = await import(url);
+    
+    // Create callback that routes actions to hudManager's live tracker
+    const liveTrackerCallback = (method, ...args) => {
+      if (!hudManager || !hudManager.liveTracker) return;
+      
+      try {
+        switch (method) {
+          case 'trackPreflopAction':
+            const [tableId1, seat1, action1, amount1, isBlinds] = args;
+            hudManager.liveTracker.trackPreflopAction(tableId1, seat1, action1, amount1, isBlinds);
+            break;
+          case 'trackPostflopAction':
+            const [tableId2, seat2, street, action2, amount2] = args;
+            hudManager.liveTracker.trackPostflopAction(tableId2, seat2, street, action2, amount2);
+            break;
+          case 'trackHandComplete':
+            const [tableId3, seat3, showdown, won, netAmount] = args;
+            hudManager.liveTracker.trackHandComplete(tableId3, seat3, showdown, won, netAmount);
+            break;
+        }
+        
+        // Trigger HUD update after action
+        if (method === 'trackHandComplete') {
+          setTimeout(() => {
+            if (hudManager && hudManager.isActive) {
+              hudManager.updateHUDWindow('main');
+            }
+          }, 100);
+        }
+      } catch (error) {
+        console.error('[Live Tracker] Callback error:', error);
+      }
+    };
+    
+    // Register callback with db_import module
+    if (dbImport.setLiveTrackerCallback) {
+      dbImport.setLiveTrackerCallback(liveTrackerCallback);
+      console.log('✅ Live tracker integration enabled');
+      liveTrackerIntegrationSetup = true;
+    }
+  } catch (error) {
+    console.error('❌ Failed to setup live tracker integration:', error);
+  }
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+}
+function openDb() {
+  const dbPath = path.join(__dirname, 'hands.db');
+  const d = new Database(dbPath);
+  d.pragma('journal_mode = WAL');
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS hands (
+      id        TEXT PRIMARY KEY,
+      dateUTC   TEXT,
+      tableName TEXT,
+      sb        REAL,
+      bb        REAL,
+      hero      TEXT,
+      json      TEXT NOT NULL,
+      ts        INTEGER,
+      heroNet   REAL  -- NEW: net result for Hero in USD (win minus invested)
+    );
+    CREATE INDEX IF NOT EXISTS idx_hands_ts    ON hands(ts);
+    CREATE INDEX IF NOT EXISTS idx_hands_table ON hands(tableName);
+  `);
+  return d;
+}
+async function loadParserModule() {
+  if (!parserModulePromise) {
+    const url = pathToFileURL(path.join(__dirname, 'parser_starter.js')).href;
+    parserModulePromise = import(url).catch((err) => {
+      parserModulePromise = null;
+      throw err;
+    });
+  }
+  return parserModulePromise;
+}
+async function inspectZip(filePath, buffer, options) {
+  if (!yauzl) {
+    return {
+      ok: false,
+      path: filePath,
+      sizeBytes: buffer.length,
+      hexFirst: formatHexSample(buffer),
+      gzipped: false,
+      encoding: 'zip',
+      decodedLen: 0,
+      room: 'zip',
+      decPreview: '',
+      hands: 0,
+      blank: false,
+      parseError: "ZIP support requires the 'yauzl' package (npm install yauzl)",
+    };
+  }
+  const { parseHands = true, maxPreview = MAX_PREVIEW_CHARS } = options || {};
+  return new Promise((resolve) => {
+    yauzl.fromBuffer(buffer, { lazyEntries: true }, async (err, zip) => {
+      if (err || !zip) {
+        return resolve({
+          ok: false,
+          path: filePath,
+          sizeBytes: buffer.length,
+          hexFirst: formatHexSample(buffer),
+          gzipped: false,
+          encoding: 'zip',
+          decodedLen: 0,
+          room: 'zip',
+          decPreview: '',
+          hands: 0,
+          blank: false,
+          parseError: err?.message || String(err || 'open zip failed'),
+        });
+      }
+      let parseError = null;
+      let parseHandsFn = null;
+      if (parseHands) {
+        try {
+          const mod = await loadParserModule();
+          const fn = mod?.parseHandsText || mod?.default?.parseHandsText;
+          if (typeof fn === 'function') parseHandsFn = fn;
+          else parseError = 'parseHandsText() missing';
+        } catch (e) {
+          parseError = e?.message || String(e);
+        }
+      }
+      const entryPreviews = [];
+      let aggregatedText = '';
+      let totalHands = 0;
+      const MAX_BYTES = 1_500_000;
+      const collectEntry = (entry, text) => {
+        entryPreviews.push({
+          name: entry.fileName,
+          size: entry.uncompressedSize,
+          preview: normalisePreview(text, maxPreview),
+        });
+        if (aggregatedText.length < MAX_BYTES) {
+          aggregatedText += text.slice(0, MAX_BYTES - aggregatedText.length);
+        }
+      };
+      const finish = async () => {
+        let room = 'unknown';
+        if (aggregatedText) {
+          room = detectRoom(aggregatedText);
+        }
+        resolve({
+          ok: true,
+          path: filePath,
+          sizeBytes: buffer.length,
+          hexFirst: formatHexSample(buffer),
+          gzipped: false,
+          encoding: 'zip',
+          decodedLen: aggregatedText.length,
+          room,
+          decPreview: normalisePreview(aggregatedText, maxPreview),
+          hands: parseHandsFn ? totalHands : 0,
+          blank: !aggregatedText.trim().length,
+          parseError,
+          zipEntries: entryPreviews,
+        });
+      };
+      const handleEntry = (entry) => {
+        if (/\/$/.test(entry.fileName)) { zip.readEntry(); return; }
+        const ext = path.extname(entry.fileName).toLowerCase();
+        if (!['.txt', '.log', '.hh'].includes(ext)) { zip.readEntry(); return; }
+        zip.openReadStream(entry, (err2, stream) => {
+          if (err2 || !stream) { zip.readEntry(); return; }
+          const chunks = [];
+          stream.on('data', (c) => chunks.push(c));
+          stream.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            collectEntry(entry, text);
+            if (parseHandsFn) {
+              try {
+                const arr = parseHandsFn(text) || [];
+                totalHands += Array.isArray(arr) ? arr.length : 0;
+              } catch (entryErr) {
+                parseError = parseError || entryErr?.message || String(entryErr);
+              }
+            }
+            zip.readEntry();
+          });
+        });
+      };
+      zip.on('entry', handleEntry);
+      zip.on('end', () => finish());
+      zip.on('error', (zipErr) => {
+        resolve({
+          ok: false,
+          path: filePath,
+          sizeBytes: buffer.length,
+          hexFirst: formatHexSample(buffer),
+          gzipped: false,
+          encoding: 'zip',
+          decodedLen: 0,
+          room: 'zip',
+          decPreview: '',
+          hands: 0,
+          blank: false,
+          parseError: zipErr?.message || String(zipErr),
+        });
+      });
+      zip.readEntry();
+    });
+  });
+}
+async function inspectFile(filePath, options = {}) {
+  const { parseHands = true, maxPreview = MAX_PREVIEW_CHARS } = options;
+  const buffer = await fsp.readFile(filePath);
+  const sizeBytes = buffer.length;
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.zip') {
+    return inspectZip(filePath, buffer, { parseHands, maxPreview });
+  }
+  const gzipped = isGzipBuffer(buffer);
+  let decodedBuffer = buffer;
+  let gzError = null;
+  if (gzipped) {
+    try {
+      decodedBuffer = zlib.gunzipSync(buffer);
+    } catch (err) {
+      gzError = err?.message || String(err);
+      decodedBuffer = Buffer.alloc(0);
+    }
+  }
+  const encoding = detectEncoding(decodedBuffer);
+  const text = decodeBuffer(decodedBuffer, encoding);
+  const decodedLen = text.length;
+  const blank = !text.trim().length;
+  const decPreview = normalisePreview(text, maxPreview);
+  let hands = null;
+  let parseError = null;
+  if (parseHands && text) {
+    try {
+      const mod = await loadParserModule();
+      const parseHandsText = mod?.parseHandsText || mod?.default?.parseHandsText;
+      if (typeof parseHandsText === 'function') {
+        const arr = parseHandsText(text) || [];
+        hands = Array.isArray(arr) ? arr.length : 0;
+      } else {
+        parseError = 'parseHandsText() missing';
+        hands = 0;
+      }
+    } catch (err) {
+      parseError = err?.message || String(err);
+      hands = 0;
+    }
+  }
+  return {
+    ok: true,
+    path: filePath,
+    sizeBytes,
+    hexFirst: formatHexSample(buffer),
+    gzipped,
+    gzError,
+    encoding,
+    decodedLen,
+    room: detectRoom(text),
+    decPreview,
+    hands,
+    blank,
+    parseError,
+  };
+}
+async function scanFolder(rootPath, options = {}) {
+  const { sampleLimit = 5, inspectLimit = 200 } = options;
+  const result = {
+    ok: true,
+    root: rootPath,
+    totalFiles: 0,
+    zeroByte: 0,
+    blankText: 0,
+    gzCount: 0,
+    textLike: 0,
+    samples: [],
+  };
+  const stack = [rootPath];
+  let inspected = 0;
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = await fsp.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      result.totalFiles++;
+      let stats;
+      try {
+        stats = await fsp.stat(full);
+      } catch {
+        continue;
+      }
+      if (stats.size === 0) result.zeroByte++;
+      const ext = path.extname(entry.name).toLowerCase();
+      const textLikely = TEXT_EXTENSIONS.has(ext);
+      if (textLikely) result.textLike++;
+      if (textLikely && inspected < inspectLimit) {
+        inspected++;
+        try {
+          const detail = await inspectFile(full, { parseHands: false, maxPreview: 160 });
+          if (detail.gzipped) result.gzCount++;
+          if (detail.blank) result.blankText++;
+          if (result.samples.length < sampleLimit) {
+            result.samples.push({
+              path: path.relative(rootPath, full) || entry.name,
+              encoding: detail.encoding,
+              gzipped: !!detail.gzipped,
+              room: detail.room,
+              preview: detail.decPreview,
+            });
+          }
+        } catch (err) {
+          if (result.samples.length < sampleLimit) {
+            result.samples.push({
+              path: path.relative(rootPath, full) || entry.name,
+              error: err?.message || String(err),
+            });
+          }
+        }
+      } else if (ext === '.gz') {
+        result.gzCount++;
+      }
+      if (result.totalFiles >= MAX_FOLDER_SCAN_FILES) {
+        result.note = `Stopped after ${MAX_FOLDER_SCAN_FILES} files (limit).`;
+        return result;
+      }
+    }
+  }
+  if (inspected >= inspectLimit) {
+    result.note = `Inspected first ${inspectLimit} text-like files (limit).`;
+  }
+  return result;
+}
+async function rebuildPlayerStats() {
+  const url = pathToFileURL(path.join(__dirname, 'db_build_stats.js')).href;
+  const mod = await import(url);
+  if (typeof mod.buildStats !== 'function') throw new Error('buildStats() not exported');
+  if (!db) throw new Error('database not initialized');
+  const res = await mod.buildStats({ db });
+  if (!res || res.ok !== true) throw new Error(res?.error || 'player stats rebuild failed');
+  return res;
+}
+
+function rebuildPlayerStats() {
+  // Rebuild player_stats table from hands
+  try {
+    const url = pathToFileURL(path.join(__dirname, 'db_build_stats.js')).href;
+    import(url).then(module => {
+      if (module.buildAllPlayerStats) {
+        module.buildAllPlayerStats(db);
+        logger.info('Player stats rebuilt successfully');
+      }
+    }).catch(err => {
+      logger.error('Failed to rebuild player stats:', err);
+    });
+  } catch (err) {
+    logger.error('Error importing db_build_stats:', err);
+  }
+}
+
+function registerIpcHandlers() {
+  logger.info('Registering IPC handlers');
+  
+  // Register modularized handlers
+  registerHandsHandlers(ipcMain, db);
+  registerStatsHandlers(ipcMain, db, __dirname);
+  registerAnnotationsHandlers(ipcMain, db);
+  registerSessionsHandlers(ipcMain, db);
+  registerDbHandlers(ipcMain, db, __dirname);
+  registerImportHandlers(ipcMain, db, __dirname, dialog, win, rebuildPlayerStats);
+  registerReportsHandlers(ipcMain, db);
+  
+  logger.info('Modularized handlers registered successfully');
+  
+  // === NON-MODULAR UTILITY HANDLERS ===
+  // File/Folder testing utilities
+  ipcMain.handle('filetester:choose', async () => {
+    const {
+      limit = 500,
+      offset = 0,
+      order = 'hands',
+      dir = 'desc',
+      player,
+      search,
+    } = options || {};
+    const clauses = [];
+    const params = [];
+    if (player) {
+      clauses.push('player = ?');
+      params.push(player);
+    } else if (search) {
+      clauses.push('player LIKE ?');
+      params.push(`%${search}%`);
+    }
+    let sql = `
+      SELECT player, hands,
+             VPIP_pct, PFR_pct, ThreeBet_pct, FourBet_pct, Squeeze_pct,
+             WTSD_pct, WWSF_pct, AFq_pct,
+             CBetF_pct, CBetT_pct, CBetR_pct,
+             FoldToCBetF_pct, FoldToCBetT_pct, FoldToCBetR_pct,
+             StealAtt, StealSucc_pct, CheckRaiseF,
+             positional_json, vs_hero_json, samples_json, confidence_json, raw_json,
+             updated_at
+      FROM player_stats
+    `;
+    if (clauses.length) {
+      sql += ' WHERE ' + clauses.join(' AND ');
+    }
+    const orderKey = String(order || 'hands').toLowerCase();
+    const orderMap = {
+      hands: 'hands',
+      player: 'player',
+      vpip: 'VPIP_pct',
+      pfr: 'PFR_pct',
+      updated: 'updated_at',
+    };
+    const column = orderMap[orderKey] || 'hands';
+    const direction = String(dir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const secondary = column === 'player' ? 'hands DESC' : 'player ASC';
+    sql += ` ORDER BY ${column} ${direction}, ${secondary}`;
+    sql += ' LIMIT ? OFFSET ?';
+    params.push(Math.max(1, Math.min(Number(limit) || 500, 5000)));
+    params.push(Math.max(0, Number(offset) || 0));
+    try {
+      const stmt = db.prepare(sql);
+      const parseJson = (value) => {
+        if (!value) return {};
+        if (typeof value === 'object') return value || {};
+        try {
+          return JSON.parse(value);
+        } catch {
+          return {};
+        }
+      };
+      const rowsRaw = stmt.all(...params);
+      const rows = Array.isArray(rowsRaw)
+        ? rowsRaw.map((row) => ({
+            player: row.player,
+            hands: row.hands,
+            VPIP_pct: row.VPIP_pct,
+            PFR_pct: row.PFR_pct,
+            ThreeBet_pct: row.ThreeBet_pct,
+            FourBet_pct: row.FourBet_pct,
+            Squeeze_pct: row.Squeeze_pct,
+            CBetF_pct: row.CBetF_pct,
+            CBetT_pct: row.CBetT_pct,
+            CBetR_pct: row.CBetR_pct,
+            FoldToCBetF_pct: row.FoldToCBetF_pct,
+            FoldToCBetT_pct: row.FoldToCBetT_pct,
+            FoldToCBetR_pct: row.FoldToCBetR_pct,
+            WTSD_pct: row.WTSD_pct,
+            WWSF_pct: row.WWSF_pct,
+            AFq_pct: row.AFq_pct,
+            StealAtt: row.StealAtt,
+            StealSucc_pct: row.StealSucc_pct,
+            CheckRaiseF: row.CheckRaiseF,
+            positional: parseJson(row.positional_json),
+            vsHero: parseJson(row.vs_hero_json),
+            samples: parseJson(row.samples_json),
+            confidence: parseJson(row.confidence_json),
+            raw: parseJson(row.raw_json),
+            updated_at: row.updated_at,
+          }))
+        : [];
+      if (!rows.length) return rows;
+      const heroName = fetchLatestHeroName(db);
+      if (!heroName) return rows;
+      const heroIndex = rows.findIndex((row) => namesEqual(row.player, heroName));
+      if (heroIndex === -1) return rows;
+      try {
+        const heroRows = fetchHandsForMetrics(db);
+        const heroPercents = computeHeroAggregatePercents(heroRows);
+        const heroRow = { ...rows[heroIndex] };
+        if (Number.isFinite(heroPercents.pfr)) heroRow.PFR_pct = heroPercents.pfr;
+        if (Number.isFinite(heroPercents.threeBet)) heroRow.ThreeBet_pct = heroPercents.threeBet;
+        if (Number.isFinite(heroPercents.wtsd)) heroRow.WTSD_pct = heroPercents.wtsd;
+        if (Number.isFinite(heroPercents.cbetF)) heroRow.CBetF_pct = heroPercents.cbetF;
+        if (Number.isFinite(heroPercents.cbetT)) heroRow.CBetT_pct = heroPercents.cbetT;
+        if (Number.isFinite(heroPercents.cbetR)) heroRow.CBetR_pct = heroPercents.cbetR;
+        if (heroRow.samples) {
+          heroRow.samples.PFR_pct = heroPercents.pfrOpp;
+          heroRow.samples.ThreeBet_pct = heroPercents.threeBetOpp;
+          heroRow.samples.WTSD_pct = heroPercents.wtsdOpp;
+          heroRow.samples.CBetF_pct = heroPercents.cbetFOpp;
+          heroRow.samples.CBetT_pct = heroPercents.cbetTOpp;
+          heroRow.samples.CBetR_pct = heroPercents.cbetROpp;
+        }
+        const next = rows.slice();
+        next[heroIndex] = heroRow;
+        return next;
+      } catch {
+        return rows;
+      }
+    } catch {
+      return [];
+    }
+  });
+  ipcMain.handle('stats:heroName', () => fetchLatestHeroName(db));
+  ipcMain.handle('stats:heroBreakdown', (_event, options = {}) => {
+    const {
+      groupBy = 'stake',
+      limit,
+      stakes,
+      positions,
+      showdown = 'all',
+      result = 'all',
+      from,
+      to,
+    } = options || {};
+    const groupMode = String(groupBy || 'stake').toLowerCase();
+    const heroName = fetchLatestHeroName(db);
+    const parseJson = (value) => {
+      if (!value) return {};
+      if (typeof value === 'object') return value || {};
+      try {
+        return JSON.parse(value);
+      } catch {
+        return {};
+      }
+    };
+    let heroStats = null;
+    if (heroName) {
+      try {
+        const heroStmt = db.prepare(`
+          SELECT player, hands,
+                 VPIP_pct, PFR_pct, ThreeBet_pct, FourBet_pct, Squeeze_pct,
+                 WTSD_pct, WWSF_pct, AFq_pct,
+                 CBetF_pct, CBetT_pct, CBetR_pct,
+                 FoldToCBetF_pct, FoldToCBetT_pct, FoldToCBetR_pct,
+                 StealAtt, StealSucc_pct, CheckRaiseF,
+                 positional_json, vs_hero_json, samples_json, confidence_json, raw_json,
+                 updated_at
+          FROM player_stats
+          WHERE player = ?
+          LIMIT 1
+        `);
+        const row = heroStmt.get(heroName);
+        if (row) {
+          heroStats = {
+            player: row.player,
+            hands: row.hands,
+            VPIP_pct: row.VPIP_pct,
+            PFR_pct: row.PFR_pct,
+            ThreeBet_pct: row.ThreeBet_pct,
+            FourBet_pct: row.FourBet_pct,
+            Squeeze_pct: row.Squeeze_pct,
+            WTSD_pct: row.WTSD_pct,
+            WWSF_pct: row.WWSF_pct,
+            AFq_pct: row.AFq_pct,
+            CBetF_pct: row.CBetF_pct,
+            CBetT_pct: row.CBetT_pct,
+            CBetR_pct: row.CBetR_pct,
+            FoldToCBetF_pct: row.FoldToCBetF_pct,
+            FoldToCBetT_pct: row.FoldToCBetT_pct,
+            FoldToCBetR_pct: row.FoldToCBetR_pct,
+            StealAtt: row.StealAtt,
+            StealSucc_pct: row.StealSucc_pct,
+            CheckRaiseF: row.CheckRaiseF,
+            positional: parseJson(row.positional_json),
+            vsHero: parseJson(row.vs_hero_json),
+            samples: parseJson(row.samples_json),
+            confidence: parseJson(row.confidence_json),
+            raw: parseJson(row.raw_json),
+            updated_at: row.updated_at,
+          };
+        }
+      } catch {
+        heroStats = null;
+      }
+    }
+    const maxHands = Number(limit) > 0 ? Number(limit) : null;
+    const stakeSet = Array.isArray(stakes) && stakes.length ? new Set(stakes) : null;
+    const positionSet = Array.isArray(positions) && positions.length ? new Set(positions) : null;
+    const showdownMode = String(showdown || 'all').toLowerCase();
+    const resultMode = String(result || 'all').toLowerCase();
+    const fromTs = Date.parse(from || '');
+    const toTs = Date.parse(to || '');
+    const hasFrom = Number.isFinite(fromTs);
+    const hasTo = Number.isFinite(toTs);
+    const rows = fetchHandsForMetrics(db);
+    const groups = new Map();
+    const availableStakes = new Map();
+    const availablePositions = new Set();
+    let processed = 0;
+    for (const row of rows) {
+      if (maxHands && processed >= maxHands) break;
+      if (!row?.json) continue;
+      let hand;
+      try {
+        hand = JSON.parse(row.json);
+      } catch {
+        continue;
+      }
+      const metrics = computeHeroHandMetrics(hand, row);
+      if (!metrics) continue;
+      if (hasFrom && typeof metrics.ts === 'number' && metrics.ts < fromTs) continue;
+      if (hasTo && typeof metrics.ts === 'number' && metrics.ts > toTs) continue;
+      if (!availableStakes.has(metrics.stakeKey)) {
+        availableStakes.set(metrics.stakeKey, {
+          label: metrics.stakeLabel || metrics.stakeKey,
+          sort: Number.isFinite(metrics.stakeSort) ? metrics.stakeSort : 0,
+        });
+      }
+      availablePositions.add(metrics.position || 'Unknown');
+      if (stakeSet && !stakeSet.has(metrics.stakeKey)) continue;
+      if (positionSet) {
+        const posKey = metrics.position || 'Unknown';
+        if (!positionSet.has(posKey)) continue;
+      }
+      if (showdownMode === 'showdown' && !metrics.showdown) continue;
+      if (showdownMode === 'nonshowdown' && metrics.showdown) continue;
+      if (resultMode === 'won' && metrics.netUSD <= 0.005) continue;
+      if (resultMode === 'lost' && metrics.netUSD >= -0.005) continue;
+      if (resultMode === 'breakeven' && Math.abs(metrics.netUSD) > 0.005) continue;
+      processed++;
+      const key = groupMode === 'position' ? (metrics.position || 'Unknown') : metrics.stakeKey;
+      let entry = groups.get(key);
+      if (!entry) {
+        const label = groupMode === 'position'
+          ? (metrics.position || 'Unknown')
+          : (metrics.stakeLabel || metrics.stakeKey);
+        entry = {
+          key,
+          label,
+          sb: metrics.sb,
+          bb: metrics.bb,
+          hands: 0,
+          netUSD: 0,
+          netBB: 0,
+          showdownUSD: 0,
+          nonShowdownUSD: 0,
+          preRakeUSD: 0,
+          preRakeBB: 0,
+          vpip: 0,
+          vpipOpp: 0,
+          pfr: 0,
+          pfrOpp: 0,
+          wtsd: 0,
+          wtsdOpp: 0,
+          wwsf: 0,
+          wwsfOpp: 0,
+          threeBet: 0,
+          threeBetOpp: 0,
+          cbetF: 0,
+          cbetF_opp: 0,
+          cbetT: 0,
+          cbetT_opp: 0,
+          cbetR: 0,
+          cbetR_opp: 0,
+          rakeUSD: 0,
+          jackpotUSD: 0,
+          totalRakeUSD: 0,
+        };
+        groups.set(key, entry);
+      }
+      entry.hands += 1;
+      entry.netUSD += metrics.netUSD;
+      entry.netBB += metrics.netBB;
+      entry.showdownUSD += metrics.showdownUSD;
+      entry.nonShowdownUSD += metrics.nonShowdownUSD;
+      const metricPreRakeUSD = typeof metrics.heroPreRakeUSD === 'number'
+        ? metrics.heroPreRakeUSD
+        : metrics.netUSD + (metrics.heroRakeTotal ?? 0);
+      const metricPreRakeBB = typeof metrics.heroPreRakeBB === 'number'
+        ? metrics.heroPreRakeBB
+        : (metrics.bb > 0 ? metricPreRakeUSD / metrics.bb : 0);
+      entry.preRakeUSD += metricPreRakeUSD;
+      entry.preRakeBB += metricPreRakeBB;
+      entry.vpip += metrics.vpip || 0;
+      entry.vpipOpp += metrics.vpipOpp || 0;
+      entry.pfr += metrics.pfr || 0;
+      entry.pfrOpp += metrics.pfrOpp || 0;
+      entry.wtsd += metrics.wtsd || 0;
+      entry.wtsdOpp += metrics.wtsdOpp || 0;
+      entry.wwsf += metrics.wwsf || 0;
+      entry.wwsfOpp += metrics.wwsfOpp || 0;
+      entry.threeBet += metrics.threeBet;
+      entry.threeBetOpp += metrics.threeBetOpp;
+      entry.cbetF += metrics.cbetF;
+      entry.cbetF_opp += metrics.cbetF_opp;
+      entry.cbetT += metrics.cbetT;
+      entry.cbetT_opp += metrics.cbetT_opp;
+      entry.cbetR += metrics.cbetR;
+      entry.cbetR_opp += metrics.cbetR_opp;
+      entry.rakeUSD += metrics.heroRake;
+      entry.jackpotUSD += metrics.heroJackpot;
+      const totalRakeUSD = metrics.heroRakeTotal ?? (metrics.heroRake + metrics.heroJackpot + (metrics.heroExtrasOther ?? 0));
+      entry.totalRakeUSD += totalRakeUSD;
+    }
+    const toPct = (value, denom) => (denom ? (value / denom) * 100 : 0);
+    const rowsOut = Array.from(groups.values()).map((entry) => {
+      const hands = entry.hands;
+      const bbPer100 = hands ? entry.netBB / (hands / 100) : 0;
+      const vpipPct = toPct(entry.vpip, entry.vpipOpp || entry.hands);
+      const pfrPct = toPct(entry.pfr, entry.pfrOpp || entry.hands);
+      const wtsdPct = toPct(entry.wtsd, entry.wtsdOpp);
+      const wwsfPct = toPct(entry.wwsf, entry.wwsfOpp);
+      return {
+        key: entry.key,
+        label: entry.label,
+        hands,
+        netUSD: Number(entry.netUSD.toFixed(2)),
+        netBB: Number(entry.netBB.toFixed(2)),
+        bbPer100: Number(bbPer100.toFixed(2)),
+        showdownUSD: Number(entry.showdownUSD.toFixed(2)),
+        nonShowdownUSD: Number(entry.nonShowdownUSD.toFixed(2)),
+        preRakeUSD: Number(entry.preRakeUSD.toFixed(2)),
+        preRakeBBPer100: hands ? Number((entry.preRakeBB / (hands / 100)).toFixed(2)) : 0,
+        vpip_pct: Number(vpipPct.toFixed(1)),
+        pfr_pct: Number(pfrPct.toFixed(1)),
+        threeBet_pct: Number(toPct(entry.threeBet, entry.threeBetOpp).toFixed(1)),
+        threeBetOpp: entry.threeBetOpp,
+        cbetF_pct: Number(toPct(entry.cbetF, entry.cbetF_opp).toFixed(1)),
+        cbetT_pct: Number(toPct(entry.cbetT, entry.cbetT_opp).toFixed(1)),
+        cbetR_pct: Number(toPct(entry.cbetR, entry.cbetR_opp).toFixed(1)),
+        cbetF_opp: entry.cbetF_opp,
+        cbetT_opp: entry.cbetT_opp,
+        cbetR_opp: entry.cbetR_opp,
+        cbetFCount: entry.cbetF,
+        cbetTCount: entry.cbetT,
+        cbetRCount: entry.cbetR,
+        rakeUSD: Number(entry.rakeUSD.toFixed(2)),
+        jackpotUSD: Number(entry.jackpotUSD.toFixed(2)),
+        totalRakeUSD: Number(entry.totalRakeUSD.toFixed(2)),
+        threeBetCount: entry.threeBet,
+        threeBetOppCount: entry.threeBetOpp,
+        pfrCount: entry.pfr,
+        pfrOppCount: entry.pfrOpp,
+        wtsdCount: entry.wtsd,
+        wtsdOppCount: entry.wtsdOpp,
+        wtsd_pct: Number(wtsdPct.toFixed(1)),
+        wwsf_pct: Number(wwsfPct.toFixed(1)),
+        sb: entry.sb,
+        bb: entry.bb,
+      };
+    }).sort((a, b) => b.hands - a.hands);
+    const stakeOptions = Array.from(availableStakes.entries()).map(([key, info]) => ({
+      key,
+      label: info?.label || key,
+      sort: Number(info?.sort) || 0,
+    }));
+    stakeOptions.sort((a, b) => {
+      const specialA = a.key.startsWith('special:');
+      const specialB = b.key.startsWith('special:');
+      if (specialA && specialB) return a.label.localeCompare(b.label);
+      if (specialA) return 1;
+      if (specialB) return -1;
+      if (a.sort !== b.sort) return a.sort - b.sort;
+      return a.label.localeCompare(b.label);
+    });
+    const available = {
+      stakes: stakeOptions,
+      positions: Array.from(availablePositions).sort(),
+    };
+    return {
+      groupBy: groupMode,
+      rows: rowsOut,
+      totalHands: processed,
+      available,
+      heroName,
+      heroStats,
+    };
+  });
+  // Hands list
+  ipcMain.handle('hands:list', (e, options = {}) => {
+    const {
+      q = '',
+      limit = 300,
+      result = 'all',
+      minBB,
+      maxBB,
+      from,
+      to,
+      stake,
+      sortField = 'date',
+      sortDir = 'desc',
+    } = options || {};
+    try {
+      const clauses = [];
+      const params = [];
+      let sql = `
+        SELECT id as handId, dateUTC, tableName, sb, bb, heroNet, ts, json
+        FROM hands
+      `;
+      if (q) {
+        clauses.push('(tableName LIKE ? OR id LIKE ? OR json LIKE ?)');
+        const like = `%${q}%`;
+        params.push(like, like, like);
+      }
+      if (result === 'won') {
+        clauses.push('heroNet > 0.005');
+      } else if (result === 'lost') {
+        clauses.push('heroNet < -0.005');
+      } else if (result === 'breakeven') {
+        clauses.push('ABS(heroNet) <= 0.005');
+      }
+      const minBbVal = Number(minBB);
+      if (!Number.isNaN(minBbVal) && minBB !== '' && minBB != null) {
+        clauses.push('bb >= ?');
+        params.push(minBbVal);
+      }
+      const maxBbVal = Number(maxBB);
+      if (!Number.isNaN(maxBbVal) && maxBB !== '' && maxBB != null) {
+        clauses.push('bb <= ?');
+        params.push(maxBbVal);
+      }
+      const fromTs = Date.parse(from);
+      if (!Number.isNaN(fromTs)) {
+        clauses.push('ts IS NOT NULL AND ts >= ?');
+        params.push(fromTs);
+      }
+      const toTs = Date.parse(to);
+      if (!Number.isNaN(toTs)) {
+        clauses.push('ts IS NOT NULL AND ts <= ?');
+        params.push(toTs);
+      }
+      if (stake && stake !== 'all') {
+        const parts = String(stake).split('/');
+        if (parts.length === 2) {
+          const sbVal = Number(parts[0]);
+          const bbVal = Number(parts[1]);
+          if (!Number.isNaN(sbVal) && !Number.isNaN(bbVal)) {
+            clauses.push('sb = ? AND bb = ?');
+            params.push(sbVal, bbVal);
+          }
+        }
+      }
+      if (clauses.length) {
+        sql += ' WHERE ' + clauses.join(' AND ');
+      }
+      const sortMap = {
+        date: 'ts',
+        net: 'heroNet',
+        stakes: 'bb',
+        table: 'tableName',
+        id: 'id',
+      };
+      const column = sortMap[String(sortField)] || 'ts';
+      const direction = String(sortDir).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+      const orderParts = [`${column} ${direction}`];
+      if (column !== 'ts') {
+        orderParts.push('ts DESC NULLS FIRST', 'rowid DESC');
+      } else {
+        orderParts.push('rowid DESC');
+      }
+      sql += ' ORDER BY ' + orderParts.join(', ') + ' LIMIT ?';
+      const safeLimit = Math.max(1, Math.min(Number(limit) || 250, 1000));
+      params.push(safeLimit);
+      const stmt = db.prepare(sql);
+      const rows = stmt.all(...params);
+      return rows.map((row) => {
+        const out = {
+          handId: row.handId,
+          dateUTC: row.dateUTC,
+          tableName: row.tableName,
+          sb: row.sb,
+          bb: row.bb,
+          heroNet: row.heroNet,
+          ts: row.ts,
+        };
+        if (row.json) {
+          try {
+            const hand = JSON.parse(row.json);
+            const metrics = computeHeroHandMetrics(hand, row);
+            if (metrics) {
+              out.heroRake = typeof metrics.heroRake === 'number' ? metrics.heroRake : null;
+              out.stakeLabel = metrics.stakeLabel || null;
+              if (Number.isFinite(metrics.sb)) out.sb = metrics.sb;
+              if (Number.isFinite(metrics.bb)) out.bb = metrics.bb;
+            } else {
+              out.heroRake = null;
+            }
+          } catch {
+            out.heroRake = null;
+          }
+        } else {
+          out.heroRake = null;
+        }
+        return out;
+      });
+    } catch { return []; }
+  });
+  // Single hand
+  ipcMain.handle('hands:get', (e, handId) => {
+    const row = db.prepare(`SELECT json FROM hands WHERE id = ?`).get(handId);
+    if (!row) return null;
+    try { return JSON.parse(row.json); } catch { return null; }
+  });
+  // Graph data - use heroNet if present; otherwise compute on the fly
+  ipcMain.handle('hero:graphData', (_event, options = {}) => buildHeroGraphData(db, options));
+  ipcMain.handle('stats:rebuild', async () => rebuildPlayerStats());
+  // Importer (choose folders)
+  ipcMain.handle('import:chooseFolders', async () => {
+    const res = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow() || win, {
+      properties: ['openDirectory', 'multiSelections']
+    });
+    if (res.canceled) return [];
+    return res.filePaths || [];
+  });
+  ipcMain.handle('hands:stakes', () => {
+    try {
+      const stmt = db.prepare(`
+        SELECT DISTINCT sb, bb
+        FROM hands
+        WHERE sb IS NOT NULL AND bb IS NOT NULL AND bb > 0
+        ORDER BY bb ASC, sb ASC
+        LIMIT 200
+      `);
+      const formatStakeLabel = (sb, bb) => {
+        const formatPart = (value) => {
+          const num = Number(value);
+          if (!Number.isFinite(num)) return '0';
+          const abs = Math.abs(num);
+          let decimals;
+          if (abs >= 10) {
+            decimals = 0;
+          } else if (abs >= 1) {
+            decimals = 2;
+          } else if (abs >= 0.1) {
+            decimals = 2;
+          } else if (abs >= 0.01) {
+            decimals = 2;
+          } else {
+            decimals = 4;
+          }
+          const fixed = num.toFixed(decimals);
+          if (decimals === 0) return fixed;
+          return fixed.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+        };
+        return `${formatPart(sb)} / ${formatPart(bb)}`;
+      };
+      return stmt.all().map((row) => {
+        const sb = Number(row.sb);
+        const bb = Number(row.bb);
+        return {
+          sb,
+          bb,
+          label: formatStakeLabel(sb, bb),
+          value: `${sb}/${bb}`,
+        };
+      });
+    } catch {
+      return [];
+    }
+  });
+  // Importer (start) - ESM import via file:// URL, forward progress events
+  ipcMain.handle('import:start', async (e, folders, opts = {}) => {
+    try {
+      const url = pathToFileURL(path.join(__dirname, 'db_import.js')).href;
+      const mod = await import(url);
+      const onProgress = (payload) => {
+        const w = win || BrowserWindow.getFocusedWindow();
+        if (!w) return;
+        if (typeof payload === 'string') {
+          w.webContents.send('import:progress', { line: payload });
+          return;
+        }
+        if (payload && typeof payload === 'object') {
+          const detail = { ...payload };
+          if (detail.line == null && payload.message != null) detail.line = String(payload.message);
+          w.webContents.send('import:progress', detail);
+          return;
+        }
+        w.webContents.send('import:progress', { line: String(payload ?? '') });
+      };
+      const res = await mod.runImport(folders, onProgress, { ...opts, db });
+      const targetWin = win || BrowserWindow.getFocusedWindow();
+      let statsRes = null;
+      try {
+        if (targetWin) targetWin.webContents.send('import:progress', { line: 'Rebuilding player stats...' });
+        statsRes = await rebuildPlayerStats();
+        const playersStr = (statsRes && typeof statsRes.players === 'number') ? statsRes.players : '?';
+        const handsStr = (statsRes && typeof statsRes.hands === 'number') ? statsRes.hands : '?';
+        if (targetWin) targetWin.webContents.send('import:progress', { line: `Player stats rebuilt (${playersStr} players / ${handsStr} hands)` });
+      } catch (statsErr) {
+        if (targetWin) targetWin.webContents.send('import:progress', { line: `[ERR] stats rebuild: ${statsErr?.message || statsErr}` });
+      }
+      if (targetWin) targetWin.webContents.send('import:done', { ok: true, code: 0, stats: statsRes });
+      return { ok: true, ...res, code: 0, stats: statsRes };
+    } catch (err) {
+      const w = win || BrowserWindow.getFocusedWindow();
+      if (w) {
+        w.webContents.send('import:progress', { line: `[ERR] ${err?.message || err}` });
+        w.webContents.send('import:done', { ok: false, code: 1 });
+      }
+      return { ok: false, code: 1, error: String(err) };
+    }
+  });
+  ipcMain.handle('filetester:choose', async () => {
+    const res = await dialog.showOpenDialog(win || BrowserWindow.getFocusedWindow(), {
+      properties: ['openFile']
+    });
+    if (res.canceled) return null;
+    return res.filePaths?.[0] || null;
+  });
+  ipcMain.handle('filetester:test', async (_event, filePath) => {
+    if (!filePath) return { error: 'No file path provided' };
+    try {
+      return await inspectFile(filePath, { parseHands: true });
+    } catch (err) {
+      return { error: err?.message || String(err) };
+    }
+  });
+  ipcMain.handle('foldertester:choose', async () => {
+    const res = await dialog.showOpenDialog(win || BrowserWindow.getFocusedWindow(), {
+      properties: ['openDirectory']
+    });
+    if (res.canceled) return null;
+    return res.filePaths?.[0] || null;
+  });
+  ipcMain.handle('foldertester:scan', async (_event, dirPath) => {
+    if (!dirPath) return { ok: false, error: 'No folder provided' };
+    try {
+      return await scanFolder(dirPath, {});
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
+  // HUD Overlay IPC handlers
+  ipcMain.handle('hud:start', async () => {
+    try {
+      console.log('HUD start requested');
+      if (hudOverlay) {
+        await hudOverlay.startHUD();
+        console.log('HUD started successfully');
+        return { success: true };
+      }
+      console.error('HUD overlay not initialized');
+      return { success: false, error: 'HUD overlay not initialized' };
+    } catch (error) {
+      console.error('HUD start error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('hud:stop', async () => {
+    try {
+      if (hudOverlay) {
+        hudOverlay.stopHUD();
+        return { success: true };
+      }
+      return { success: false, error: 'HUD overlay not initialized' };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('hud:toggle', async () => {
+    try {
+      console.log('HUD toggle requested');
+      if (hudOverlay) {
+        hudOverlay.toggleHUD();
+        console.log('HUD toggled, active:', hudOverlay.isActive);
+        return { success: true, active: hudOverlay.isActive };
+      }
+      console.error('HUD overlay not initialized');
+      return { success: false, error: 'HUD overlay not initialized' };
+    } catch (error) {
+      console.error('HUD toggle error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+ipcMain.handle('hud:status', async () => {
+  try {
+    if (hudOverlay) {
+      return { 
+        success: true, 
+        active: hudOverlay.isActive,
+        tables: hudOverlay.overlayWindows.size 
+      };
+    }
+    return { success: false, error: 'HUD overlay not initialized' };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.on('hud:insight', (_event, payload) => {
+  try {
+    if (hudOverlay && typeof hudOverlay.updateInsights === 'function') {
+      hudOverlay.updateInsights(payload || null);
+    }
+  } catch (error) {
+    console.error('HUD insight update failed:', error);
+  }
+});
+
+// Snap to table handler
+ipcMain.on('hud:snap-to-table', () => {
+  try {
+    if (hudOverlay) {
+      hudOverlay.snapToTable();
+    }
+  } catch (error) {
+    console.error('Error snapping to table:', error);
+  }
+});
+}
+app.whenReady().then(() => {
+  db = openDb();
+  
+  // Initialize HUD systems
+  hudOverlay = new HUDOverlayV2();
+  hudManager = new HUDManager(db);
+  
+  // Setup live tracker integration
+  setupLiveTrackerIntegration();
+  
+  registerIpcHandlers();
+  createWindow();
+  
+  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+});
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

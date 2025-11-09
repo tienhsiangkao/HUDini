@@ -1,0 +1,52 @@
+﻿
+Poker Hand #RC3475980816: Hold'em No Limit ($0.1/$0.25) - 2025/04/10 01:46:07
+Table 'RushAndCash5231839' 6-max Seat #1 is the button
+Seat 1: 56897b7e ($23.03 in chips)
+Seat 2: 95078731 ($101.81 in chips)
+Seat 3: Hero ($33.7 in chips)
+Seat 4: 88fabfe5 ($34.85 in chips)
+Seat 5: 7fa0ca72 ($10.83 in chips)
+Seat 6: c3ba989a ($36.88 in chips)
+95078731: posts small blind $0.1
+Hero: posts big blind $0.25
+*** HOLE CARDS ***
+Dealt to 56897b7e 
+Dealt to 95078731 
+Dealt to Hero [Qd Qc]
+Dealt to 88fabfe5 
+Dealt to 7fa0ca72 
+Dealt to c3ba989a 
+88fabfe5: folds
+7fa0ca72: folds
+c3ba989a: folds
+56897b7e: folds
+95078731: raises $0.5 to $0.75
+Hero: raises $1.75 to $2.5
+95078731: raises $3.75 to $6.25
+Hero: calls $3.75
+*** FIRST FLOP *** [2h 4d 5d]
+95078731: bets $4
+Hero: calls $4
+*** FIRST TURN *** [2h 4d 5d] [5c]
+95078731: bets $13.75
+Hero: raises $9.7 to $23.45
+95078731: calls $9.7
+Hero: shows [Qd Qc] (two pair, Queens and Fives)
+95078731: shows [Ad Kh] (a pair of Fives)
+*** FIRST RIVER *** [2h 4d 5d 5c] [9c]
+*** SECOND RIVER *** [2h 4d 5d 5c] [Qh]
+*** FIRST SHOWDOWN ***
+Hero collected $33.15 from pot
+*** SECOND SHOWDOWN ***
+Hero collected $33.14 from pot
+*** SUMMARY ***
+Total pot $67.4 | Rake $0.74 | Jackpot $0.37 | Bingo $0 | Fortune $0 | Tax $0
+Hand was run two times
+FIRST Board [2h 4d 5d 5c 9c]
+SECOND Board [Qh]
+Seat 1: 56897b7e (button) folded before Flop (didn't bet)
+Seat 2: 95078731 (small blind) showed [Ad Kh] and lost with a pair of Fives, and lost
+Seat 3: Hero (big blind) showed [Qd Qc] and won ($33.15) with two pair, Queens and Fives, and won ($33.14)
+Seat 4: 88fabfe5 folded before Flop (didn't bet)
+Seat 5: 7fa0ca72 folded before Flop (didn't bet)
+Seat 6: c3ba989a folded before Flop (didn't bet)

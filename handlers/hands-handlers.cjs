@@ -3,8 +3,19 @@
 
 const { logger } = require('../lib/logger.cjs');
 const { validateHandIds } = require('../utils/validators.cjs');
+const { clearGraphCache } = require('../lib/hero_graph.cjs');
 
 const handsLogger = logger.child('HandsHandlers');
+
+// Performance: Cache for expensive range calculations
+const rangeCache = new Map();
+const RANGE_CACHE_TTL = 60000; // 1 minute
+const MAX_RANGE_CACHE_SIZE = 50;
+
+function clearRangeCache() {
+  rangeCache.clear();
+  handsLogger.info('Range cache cleared');
+}
 
 function registerHandsHandlers(ipcMain, db) {
   // List hands with filters
@@ -256,6 +267,10 @@ function registerHandsHandlers(ipcMain, db) {
       const stmt = db.prepare(`DELETE FROM hands WHERE id IN (${placeholders})`);
       const result = stmt.run(...validIds);
       
+      // Invalidate caches since hand data changed
+      clearRangeCache();
+      clearGraphCache();
+      
       handsLogger.info('Deleted hands', { count: result.changes });
       return { success: true, deleted: result.changes };
     } catch (error) {
@@ -283,15 +298,49 @@ function registerHandsHandlers(ipcMain, db) {
   // Get hand range statistics (for Hand Range Visualizer)
   ipcMain.handle('hands:getRange', (_event, options = {}) => {
     try {
-      const { position = 'all', action = 'all' } = options;
+      const { position = 'all', action = 'all', from, to } = options;
       
-      // Fetch all hands with JSON data
-      const stmt = db.prepare(`
-        SELECT json, heroNet
-        FROM hands
-        WHERE json IS NOT NULL
-      `);
-      const hands = stmt.all();
+      // Check cache first
+      const cacheKey = JSON.stringify(options);
+      if (rangeCache.has(cacheKey)) {
+        const cached = rangeCache.get(cacheKey);
+        if (Date.now() - cached.timestamp < RANGE_CACHE_TTL) {
+          handsLogger.debug('Returning cached range data', { 
+            position, action, from, to,
+            cacheAge: Date.now() - cached.timestamp 
+          });
+          return cached.data;
+        } else {
+          rangeCache.delete(cacheKey);
+        }
+      }
+      
+      // Build query with optional date filters
+      let query = 'SELECT json, heroNet FROM hands WHERE json IS NOT NULL';
+      const params = [];
+      
+      // Date range filters for performance
+      if (from) {
+        const fromTs = Date.parse(from);
+        if (!Number.isNaN(fromTs)) {
+          query += ' AND ts >= ?';
+          params.push(fromTs);
+        }
+      }
+      if (to) {
+        const toTs = Date.parse(to);
+        if (!Number.isNaN(toTs)) {
+          query += ' AND ts <= ?';
+          params.push(toTs);
+        }
+      }
+      
+      // Safety limit to prevent excessive memory usage
+      query += ' ORDER BY ts DESC LIMIT 10000';
+      
+      // Fetch hands with JSON data
+      const stmt = db.prepare(query);
+      const hands = stmt.all(...params);
       
       // Aggregate by hand type (AA, KK, AKs, AKo, etc.)
       const rangeData = {};
@@ -398,14 +447,32 @@ function registerHandsHandlers(ipcMain, db) {
         }
       }
       
+      const result = { success: true, data: rangeData };
+      
+      // Cache the result
+      rangeCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
+      });
+      
+      // Limit cache size (LRU eviction)
+      if (rangeCache.size > MAX_RANGE_CACHE_SIZE) {
+        const firstKey = rangeCache.keys().next().value;
+        rangeCache.delete(firstKey);
+        handsLogger.debug('Evicted oldest cache entry', { cacheSize: rangeCache.size });
+      }
+      
       handsLogger.info('Generated hand range data', { 
         totalHands: hands.length,
         uniqueHands: Object.keys(rangeData).length,
         position,
-        action 
+        action,
+        from,
+        to,
+        cached: true
       });
       
-      return { success: true, data: rangeData };
+      return result;
     } catch (err) {
       handsLogger.error('Failed to generate hand range data', { error: err.message });
       return { success: false, error: err.message, data: {} };
@@ -415,4 +482,4 @@ function registerHandsHandlers(ipcMain, db) {
   handsLogger.info('Hands handlers registered');
 }
 
-module.exports = { registerHandsHandlers };
+module.exports = { registerHandsHandlers, clearRangeCache };
