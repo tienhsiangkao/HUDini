@@ -8,7 +8,11 @@ const path = require('path');
 const Database = require('better-sqlite3');
 
 /**
- * Helper: Get database counts
+ * Get counts of hands and players from database tables.
+ * 
+ * @param {Database} db - better-sqlite3 database instance
+ * @returns {object} Counts object with {hands, players}
+ * @private
  */
 function getDbCounts(db) {
   try {
@@ -22,7 +26,12 @@ function getDbCounts(db) {
 }
 
 /**
- * Helper: Clear database tables
+ * Clear all data from whitelisted database tables (hands, player_stats, annotations).
+ * 
+ * @param {Database} db - better-sqlite3 database instance
+ * @returns {boolean} True if successful
+ * @throws {Error} If any table deletion fails
+ * @private
  */
 function clearDatabaseTables(db) {
   try {
@@ -57,7 +66,13 @@ function clearDatabaseTables(db) {
 }
 
 /**
- * Helper: Rebuild player stats
+ * Rebuild player statistics by importing and executing db_build_stats.js module.
+ * 
+ * @param {Database} db - better-sqlite3 database instance
+ * @param {string} __dirname - Directory path for finding db_build_stats.js
+ * @returns {Promise<object>} Rebuild result with {ok, players, hands, counts}
+ * @throws {Error} If buildStats module not found or rebuild fails
+ * @private
  */
 async function rebuildPlayerStats(db, __dirname) {
   try {
@@ -85,7 +100,26 @@ async function rebuildPlayerStats(db, __dirname) {
 }
 
 /**
- * Register all database management IPC handlers
+ * Register all database management IPC handlers for backup, restore, clear, and statistics.
+ * Provides endpoints for database maintenance and administrative operations.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * @param {string} __dirname - Directory path for file operations
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * registerDbHandlers(ipcMain, db, __dirname);
+ * 
+ * @description
+ * Registered handlers:
+ * - db:counts - Get counts of hands and players in database
+ * - db:getInfo - Get database metadata (path, size, counts)
+ * - db:export - Export database to file with save dialog
+ * - db:compact - Vacuum database to reclaim space
+ * - db:clear - Clear all data from specified tables
+ * - db:rebuild - Rebuild player_stats table from hands
  */
 function registerDbHandlers(ipcMain, db, __dirname) {
   logger.info('Registering database handlers');

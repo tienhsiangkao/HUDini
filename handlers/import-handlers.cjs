@@ -1,6 +1,8 @@
 /**
  * Import and Watch Folder Handlers
- * Handles hand history file imports, folder watching, and bulk import operations
+ * Handles hand history file imports, folder watching, and bulk import operations.
+ * Supports bulk imports with progress tracking, folder watching with debouncing,
+ * and automatic cache invalidation after imports.
  */
 
 const fs = require('fs');
@@ -29,13 +31,35 @@ const bulkImportState = {
 };
 
 /**
- * Register all import and watch folder IPC handlers
- * @param {Electron.IpcMain} ipcMain - Electron IPC main object
- * @param {Database} db - SQLite database instance
- * @param {string} dbPath - Path to database file
- * @param {Electron.Dialog} dialog - Electron dialog module
- * @param {BrowserWindow} win - Main window reference
- * @param {Function} rebuildPlayerStats - Function to rebuild player stats
+ * Register all import and watch folder IPC handlers for bulk imports and file watching.
+ * Provides endpoints for importing hand history files, watching folders for changes,
+ * and managing import progress with pause/resume/cancel capabilities.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * @param {string} dbPath - Absolute path to database file
+ * @param {Electron.Dialog} dialog - Electron dialog module for file selection
+ * @param {BrowserWindow} win - Main window reference for dialogs
+ * @param {Function} rebuildPlayerStats - Function to rebuild player_stats table
+ * 
+ * @example
+ * const { ipcMain, dialog, BrowserWindow } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * const { rebuildPlayerStats } = require('./handlers/stats-handlers.cjs');
+ * registerImportHandlers(ipcMain, db, dbPath, dialog, BrowserWindow.getAllWindows()[0], rebuildPlayerStats);
+ * 
+ * @description
+ * Registered handlers:
+ * - import:chooseFolders - Show folder selection dialog for bulk import
+ * - import:start - Start bulk import from selected folders
+ * - import:pause - Pause active import process
+ * - import:resume - Resume paused import process
+ * - import:cancel - Cancel active import and cleanup
+ * - import:progress - Get current import progress and statistics
+ * - import:watch:add - Add folder to watch list for automatic imports
+ * - import:watch:remove - Remove folder from watch list
+ * - import:watch:list - List all watched folders
+ * - import:watch:removeAll - Remove all watched folders
  */
 function registerImportHandlers(ipcMain, db, dbPath, dialog, win, rebuildPlayerStats) {
   logger.info('Registering import handlers');

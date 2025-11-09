@@ -6,7 +6,23 @@ const { aggregateHandsForReports } = require('../utils/aggregators.cjs');
 const { extractHandMetrics } = require('../utils/metrics.cjs');
 
 /**
- * Register all report-related IPC handlers
+ * Register all report-related IPC handlers for custom reports, leaks, trends, and heatmaps.
+ * Provides endpoints for generating analytical reports with flexible grouping and metrics.
+ * 
+ * @param {Electron.IpcMain} ipcMain - Electron IPC main process interface
+ * @param {Database} db - better-sqlite3 database instance
+ * 
+ * @example
+ * const { ipcMain } = require('electron');
+ * const db = require('./lib/database.cjs');
+ * registerReportsHandlers(ipcMain, db);
+ * 
+ * @description
+ * Registered handlers:
+ * - reports:generate - Custom report builder with flexible grouping (overall, stake, position, date)
+ * - reports:leaks - Identify losing positions/stakes with detailed breakdown
+ * - reports:trends - Time-series analysis of winrate, VPIP, PFR over specified periods
+ * - reports:heatmap - Hourly/daily profitability heatmap with win rates
  */
 function registerReportsHandlers(ipcMain, db) {
   logger.info('Registering reports handlers');
